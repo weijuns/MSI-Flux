@@ -4,6 +4,8 @@
 
 > 基于 [YAMDCC](https://codeberg.org/Sparronator9999/YAMDCC) 深度定制的 MSI 笔记本控制工具,
 > 新增 **GPU 三模式切换**、现代化 UI, 并内置 MSI Feature Manager 服务依赖。
+>
+> 🎯 **单体 exe, 无需安装** — 双击即用, 实测运行时后台内存仅占用 ~10MB, 非常清爽。
 
 ---
 
@@ -13,7 +15,8 @@
 - **🌀 风扇控制** — 自定义 CPU/GPU 风扇转速曲线, 温度阈值调节, Cooler Boost 全速模式
 - **🚀 性能模式** — 省电 / 安静 / 均衡 / 加速 四档性能模式切换
 - **🔋 电池充电阈值** — 0-100% 自定义充电上限, 保护电池健康
-- **📦 开箱即用** — 内置精简版 Feature Manager 服务 (仅 4 文件 ~2.8MB), 无需安装 MSI Center
+- **📦 单体 exe, 开箱即用** — 无需安装, 双击即用; 内置精简版 Feature Manager 服务, 自动提取到 `C:\Program Files\MSI Flux\`, 无需安装 MSI Center
+- **🪶 极致轻量** — 实测运行时后台内存仅占用 ~10MB, 对比 MSI Center ~950MB
 - **🎨 现代化 UI** — 参考 [G-Helper](https://github.com/seerge/g-helper) 设计的简洁界面
 
 ---
