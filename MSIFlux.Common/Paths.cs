@@ -216,6 +216,47 @@ public static class Paths
         }
     }
 
+    private static int _featureManagerExtracted = 0;
+
+    /// <summary>
+    /// 把主程序集里嵌入的 FeatureManager/ 资源释放到 exe 同级目录.
+    /// 首次调用时执行, 后续调用是 no-op. 单个文件已存在时跳过.
+    /// </summary>
+    public static void EnsureFeatureManagerExtracted()
+    {
+        if (Interlocked.CompareExchange(ref _featureManagerExtracted, 1, 0) != 0) return;
+
+        try
+        {
+            var asm = typeof(Paths).Assembly;
+            string[] names = asm.GetManifestResourceNames();
+
+            string fmDir = Path.Combine(_executableDirectory, "FeatureManager");
+            Directory.CreateDirectory(fmDir);
+
+            foreach (string resName in names)
+            {
+                const string prefix = "FeatureManager/";
+                if (!resName.StartsWith(prefix, StringComparison.Ordinal)) continue;
+
+                string fileName = resName.Substring(prefix.Length);
+                string destPath = Path.Combine(fmDir, fileName);
+
+                if (File.Exists(destPath)) continue;  // 不覆盖已存在文件
+
+                using Stream? src = asm.GetManifestResourceStream(resName);
+                if (src is null) continue;
+
+                using var dst = File.Create(destPath);
+                src.CopyTo(dst);
+            }
+        }
+        catch
+        {
+            // 释放失败不致命: GPU 切换时会回退到系统安装的 Feature Manager.
+        }
+    }
+
     public static void EnsureCurrentConfigExists()
     {
         try

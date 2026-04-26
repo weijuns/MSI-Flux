@@ -62,6 +62,21 @@
     <EmbeddedResource Include="..\MSIFlux.ECAccess\WinRing0x64.sys">
       <LogicalName>WinRing0x64.sys</LogicalName>
     </EmbeddedResource>
+    <!-- FeatureManager 文件以嵌入资源形式打进 exe, 运行时提取到 exe 同级目录.
+         MSIAPService.exe 是 .NET Framework Windows 服务, 必须从磁盘运行, 无法内存加载.
+         Feature Manager Service.exe 同理依赖同目录的 DLL. -->
+    <EmbeddedResource Include="..\FeatureManager\MSIAPService.exe">
+      <LogicalName>FeatureManager/MSIAPService.exe</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="..\FeatureManager\Feature Manager Service.exe">
+      <LogicalName>FeatureManager/Feature Manager Service.exe</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="..\FeatureManager\WMILib.dll">
+      <LogicalName>FeatureManager/WMILib.dll</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="..\FeatureManager\MSIWMIACPI2.dll">
+      <LogicalName>FeatureManager/MSIWMIACPI2.dll</LogicalName>
+    </EmbeddedResource>
   </ItemGroup>
 
   <ItemGroup>

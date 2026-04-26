@@ -780,6 +780,7 @@ namespace MSIFlux.GUI
                 try
                 {
                     Paths.EnsureCurrentConfigExists();
+                    Paths.EnsureFeatureManagerExtracted();
                     _config = MSIFlux_Config.Load(Paths.CurrentConf);
                     SafeLog($"配置已加载: FanConfs={_config?.FanConfs?.Count ?? -1}");
                     return true;
