@@ -1,0 +1,76 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <ApplicationIcon>MSIFlux.ico</ApplicationIcon>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <AssemblyName>MSI Flux</AssemblyName>
+    <AssemblyTitle>YAMDCC</AssemblyTitle>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Title>YAMDCC</Title>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <PlatformTarget>AnyCPU</PlatformTarget>
+    <AllowUnsafeBlocks>True</AllowUnsafeBlocks>
+    <AssemblyVersion>3.0.0</AssemblyVersion>
+    <RootNamespace>YAMDCC.GUI</RootNamespace>
+    
+    <!-- 框架依赖单文件发布 (参考 g-helper):
+         exe 只含业务代码与 NuGet 依赖, 运行时由用户机器上的 .NET 8 Desktop
+         Runtime 提供, 最终单 exe 体积约 5-10 MB. -->
+    <PublishSingleFile>true</PublishSingleFile>
+    <SelfContained>false</SelfContained>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+
+    <!-- 追求"只产出一个 exe": 关闭 pdb 外置, 调试信息内嵌到 exe 里. -->
+    <DebugType>embedded</DebugType>
+    <DebugSymbols>true</DebugSymbols>
+
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+  </PropertyGroup>
+
+  <!-- 框架依赖模式下关闭 ReadyToRun: R2R 会生成预编译原生代码显著增大 exe,
+       而框架依赖场景体积收益是核心目标. -->
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|AnyCPU'">
+    <PublishReadyToRun>false</PublishReadyToRun>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="TaskScheduler" Version="2.12.2"/>
+    <PackageReference Include="WinForms.DataVisualization" Version="1.10.0"/>
+    <PackageReference Include="MessagePack" Version="3.1.4" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="8.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="8.0.0" />
+    <PackageReference Include="System.Management" Version="8.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- 机型 XML 模板以 EmbeddedResource 形式打进 exe, 运行时由 Paths.cs
+         提取到 %ProgramData%\MSI Flux\Templates\. LogicalName 保留相对路径
+         (e.g. "Configs/Generic/xxx.xml"), 供提取时重建目录结构. -->
+    <EmbeddedResource Include="..\Configs\**\*.xml">
+      <LogicalName>Configs/%(RecursiveDir)%(Filename)%(Extension)</LogicalName>
+    </EmbeddedResource>
+    <!-- MSIFlux.ico 已经通过 <ApplicationIcon> 嵌入 exe 本身, 运行时用
+         Icon.ExtractAssociatedIcon(ProcessPath) 直接读取, 不再外带副本. -->
+    <!-- WinRing0 驱动以嵌入资源形式打进 exe, 运行时由 EC.cs 提取到
+         %ProgramData%\MSI Flux\Drivers\. Windows 内核只能从磁盘加载驱动,
+         无法直接从内存加载, 所以必须落地. 但用户拿到的仍然只需一个 exe. -->
+    <EmbeddedResource Include="..\YAMDCC.ECAccess\WinRing0.sys">
+      <LogicalName>WinRing0.sys</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="..\YAMDCC.ECAccess\WinRing0x64.sys">
+      <LogicalName>WinRing0x64.sys</LogicalName>
+    </EmbeddedResource>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="..\YAMDCC.Common\**\*.cs" Exclude="..\YAMDCC.Common\obj\**\*.cs" />
+    <Compile Include="..\YAMDCC.ECAccess\**\*.cs" Exclude="..\YAMDCC.ECAccess\obj\**\*.cs" />
+    <Compile Include="..\YAMDCC.IPC\**\*.cs" Exclude="..\YAMDCC.IPC\obj\**\*.cs" />
+    <Compile Include="..\YAMDCC.Service\**\*.cs" Exclude="..\YAMDCC.Service\Program.cs;..\YAMDCC.Service\obj\**\*.cs" />
+    <EmbeddedResource Include="..\YAMDCC.Common\**\*.resx" />
+    <EmbeddedResource Include="..\YAMDCC.Service\Strings.resx" Link="Strings.resx" />
+  </ItemGroup>
+
+</Project>

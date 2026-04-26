@@ -1,0 +1,25 @@
+MSI Flux Disclaimer
+===================
+
+This project is a modified version of YAMDCC (https://codeberg.org/Sparronator9999/YAMDCC),
+originally created by Sparronator9999 and licensed under GPL-3.0.
+
+This program requires low-level access to your computer hardware (EC registers, WMI ACPI,
+Windows services) to apply settings. While no issues should arise from this, the authors
+shall not be held responsible if this program damages your hardware.
+
+If you do something irresponsible like turning off all fans while running under full load,
+the authors WILL NOT be held responsible for ANY damage you cause to your own hardware.
+
+The FeatureManager/ directory contains binaries that are property of Micro-Star
+International (MSI). These files are included solely for interoperability and research
+purposes. No ownership or license is claimed.
+
+All MSI trademarks, software, and related assets are the property of their respective owners.
+
+The GPU switching feature was reverse-engineered from MSI Center's Feature Manager.
+No proprietary source code was used in the implementation.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED. IN NO EVENT SHALL THE AUTHORS BE LIABLE FOR ANY CLAIM, DAMAGES OR
+OTHER LIABILITY ARISING FROM THE USE OF THIS SOFTWARE.

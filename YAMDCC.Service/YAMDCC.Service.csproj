@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <ApplicationIcon>ec.ico</ApplicationIcon>
+    <AssemblyName>yamdccsvc</AssemblyName>
+    <AssemblyTitle>YAMDCC service</AssemblyTitle>
+    <OutputType>WinExe</OutputType>
+    <Title>YAMDCC service</Title>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWindowsForms>true</UseWindowsForms>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="8.0.0"/>
+    <PackageReference Include="System.Management" Version="8.0.0"/>
+    <PackageReference Include="System.ServiceProcess.ServiceController" Version="8.0.0"/>
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\YAMDCC.Common\YAMDCC.Common.csproj"/>
+    <ProjectReference Include="..\YAMDCC.ECAccess\YAMDCC.ECAccess.csproj"/>
+    <ProjectReference Include="..\YAMDCC.IPC\YAMDCC.IPC.csproj"/>
+  </ItemGroup>
+</Project>
