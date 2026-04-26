@@ -1,4 +1,4 @@
-﻿// This file is part of MSIFlux (Yet Another MSI Dragon Center Clone).
+﻿// This file is part of MSIFlux, based on YAMDCC.
 // Licensed under GPL-3.0-or-later.
 //
 // ServiceIpcProxy: GUI 侧的命名管道客户端封装. 把 "IPC 消息异步往返" 转换成

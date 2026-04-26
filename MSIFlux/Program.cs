@@ -1,4 +1,4 @@
-﻿// This file is part of MSIFlux (Yet Another MSI Dragon Center Clone).
+﻿// This file is part of MSIFlux, based on YAMDCC.
 // Licensed under GPL-3.0-or-later.
 //
 // "单 exe 双角色" 架构入口:
