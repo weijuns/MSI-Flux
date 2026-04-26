@@ -15,7 +15,7 @@
 - **🌀 风扇控制** — 自定义 CPU/GPU 风扇转速曲线, 温度阈值调节, Cooler Boost 全速模式
 - **🚀 性能模式** — 省电 / 安静 / 均衡 / 加速 四档性能模式切换
 - **🔋 电池充电阈值** — 0-100% 自定义充电上限, 保护电池健康
-- **📦 单体 exe, 开箱即用** — 无需安装, 双击即用; 内置精简版 Feature Manager 服务, 自动提取到 `C:\Program Files\MSI Flux\`, 无需安装 MSI Center
+- **📦 单体 exe, 开箱即用** — 无需安装, 双击即用; 内置精简版 Feature Manager 自动提取到 `C:\ProgramData\MSI Flux\FeatureManager\`, 无需安装 MSI Center
 - **🪶 极致轻量** — 实测运行时后台内存仅占用 ~10MB, 对比 MSI Center ~950MB
 - **🎨 现代化 UI** — 参考 [G-Helper](https://github.com/seerge/g-helper) 设计的简洁界面
 

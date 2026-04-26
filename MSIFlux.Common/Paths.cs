@@ -221,10 +221,10 @@ public static class Paths
     /// <summary>
     /// FeatureManager 等运行时依赖文件的统一存放目录.
     /// 单 exe 分发模式下, 用户可能把 exe 放在桌面, 不应在同级目录生成杂文件.
-    /// 统一放到 Program Files 下, 保持用户桌面干净.
+    /// 统一放到 ProgramData 下 (已有 ACL 放宽逻辑), 保持用户桌面干净.
     /// </summary>
     public static readonly string AppInstallDir = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "MSI Flux");
+        Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "MSI Flux");
 
     /// <summary>
     /// 把主程序集里嵌入的 FeatureManager/ 资源释放到 AppInstallDir.

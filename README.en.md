@@ -15,7 +15,7 @@
 - **🌀 Fan Control** — Custom CPU/GPU fan speed curves, temperature threshold adjustment, Cooler Boost full-speed mode
 - **🚀 Performance Modes** — Eco / Silent / Balanced / Turbo four-tier performance mode switching
 - **🔋 Battery Charge Threshold** — 0-100% custom charge limit to preserve battery health
-- **📦 Single exe, out of the box** — No installation needed; just double-click. Bundled minimal Feature Manager service auto-extracts to `C:\Program Files\MSI Flux\`, no MSI Center required
+- **📦 Single exe, out of the box** — No installation needed; just double-click. Bundled minimal Feature Manager service auto-extracts to `C:\ProgramData\MSI Flux\FeatureManager\`, no MSI Center required
 - **🪶 Ultra lightweight** — Runtime memory usage only ~10MB, compared to MSI Center's ~950MB
 - **🎨 Modern UI** — Clean interface design inspired by [G-Helper](https://github.com/seerge/g-helper)
 
