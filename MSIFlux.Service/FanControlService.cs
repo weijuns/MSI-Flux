@@ -1194,11 +1194,15 @@ internal sealed class FanControlService : ServiceBase
                                 p!.WaitForExit(15000);
                                 Log.Info($"InstallUtil exit code: {p.ExitCode}");
 
+                                // InstallUtil 注册服务后, SCM 需要一点时间同步,
+                                // 立即启动会报 "Cannot start service" 错误.
+                                Thread.Sleep(3000);
+
                                 try
                                 {
                                     using var svc2 = new ServiceController("MSI Foundation Service");
                                     svc2.Start();
-                                    svc2.WaitForStatus(ServiceControllerStatus.Running, TimeSpan.FromSeconds(10));
+                                    svc2.WaitForStatus(ServiceControllerStatus.Running, TimeSpan.FromSeconds(15));
                                     msiFoundationReady = true;
                                     Log.Info("MSI Foundation Service installed and started");
                                 }
@@ -1250,6 +1254,9 @@ internal sealed class FanControlService : ServiceBase
                             RedirectStandardError = true
                         });
                         p!.WaitForExit(15000);
+
+                        // InstallUtil 注册服务后, SCM 需要一点时间同步
+                        Thread.Sleep(3000);
 
                         using var svc3 = new ServiceController("MSI Foundation Service");
                         svc3.Start();
