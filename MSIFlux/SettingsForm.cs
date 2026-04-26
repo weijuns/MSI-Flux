@@ -323,6 +323,12 @@ namespace MSIFlux.GUI
                 1 => Strings.GPUModeUltimate,
                 _ => Strings.GPUModeStandard
             };
+
+            // Feature Manager Service.exe 是 WPF 应用, 需要在用户会话 (有桌面) 中启动.
+            // 服务端 (SYSTEM, Session 0) 无法直接启动 WPF 进程 (会崩溃).
+            // 所以由 GUI 侧负责启动 FM Service, 服务端只负责 MSI Foundation Service.
+            EnsureFeatureManagerServiceRunning();
+
             bool ok = Program.FanRunner?.SetGpuMode(mode) ?? false;
             if (ok)
             {
@@ -363,6 +369,42 @@ namespace MSIFlux.GUI
             buttonEco.Activated = mode == 2;
             buttonStandard.Activated = mode == 0;
             buttonUltimate.Activated = mode == 1;
+        }
+
+        /// <summary>
+        /// 确保 Feature Manager Service.exe 在用户会话中运行.
+        /// 它是 WPF 应用, 在 Session 0 (服务端) 会崩溃, 必须由 GUI 侧启动.
+        /// 如果启动失败也不影响 GPU 切换 — 服务端会自己创建注册表键.
+        /// </summary>
+        private void EnsureFeatureManagerServiceRunning()
+        {
+            if (System.Diagnostics.Process.GetProcessesByName("Feature Manager Service").Length > 0)
+                return;  // 已在运行
+
+            // 查找 FeatureManager 目录
+            string[] fmDirCandidates =
+            {
+                System.IO.Path.Combine(MSIFlux.Common.Paths.AppInstallDir, "FeatureManager"),
+                System.IO.Path.Combine(System.IO.Path.GetDirectoryName(Environment.ProcessPath) ?? ".", "FeatureManager"),
+                @"C:\Program Files (x86)\Feature Manager",
+            };
+
+            string? fmDir = fmDirCandidates.FirstOrDefault(d =>
+                System.IO.File.Exists(System.IO.Path.Combine(d, "Feature Manager Service.exe")));
+
+            if (fmDir == null) return;  // 没有就不启动, 不影响 GPU 切换
+
+            try
+            {
+                string fmExe = System.IO.Path.Combine(fmDir, "Feature Manager Service.exe");
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(fmExe)
+                {
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                    WorkingDirectory = fmDir
+                });
+            }
+            catch { }  // 启动失败不致命, 服务端会自己创建注册表键
         }
 
         private void SetPerformanceMode(int modeIndex)

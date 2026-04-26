@@ -1124,6 +1124,209 @@ internal sealed class FanControlService : ServiceBase
     /// Requires MSI Foundation Service and Feature Manager Service.exe running.
     /// A reboot is required after calling this.
     /// </summary>
+    /// <summary>
+    /// 用 sc.exe 启动服务并带重试. InstallUtil 刚注册的服务,
+    /// ServiceController.Start() 经常报 "Cannot start service",
+    /// 但 sc.exe start 更可靠.
+    /// </summary>
+    private bool StartServiceWithRetry(string serviceName, int maxRetries, int delayMs)
+    {
+        for (int i = 0; i < maxRetries; i++)
+        {
+            try
+            {
+                // 先检查是否已经在运行
+                using (var svc = new ServiceController(serviceName))
+                {
+                    if (svc.Status == ServiceControllerStatus.Running)
+                        return true;
+                }
+
+                // 用 sc.exe start 代替 ServiceController.Start()
+                var p = Process.Start(new ProcessStartInfo("sc.exe")
+                {
+                    Arguments = $"start \"{serviceName}\"",
+                    CreateNoWindow = true,
+                    UseShellExecute = false,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true
+                });
+                p!.WaitForExit(10000);
+                Log.Info($"sc.exe start '{serviceName}' attempt {i + 1}: exit={p.ExitCode}");
+
+                // 等待服务进入 Running 状态
+                Thread.Sleep(2000);
+                using (var svc2 = new ServiceController(serviceName))
+                {
+                    svc2.WaitForStatus(ServiceControllerStatus.Running, TimeSpan.FromSeconds(8));
+                    if (svc2.Status == ServiceControllerStatus.Running)
+                        return true;
+                }
+
+                Log.Warn($"Service '{serviceName}' not running after attempt {i + 1}, retrying...");
+                Thread.Sleep(delayMs);
+            }
+            catch (Exception ex)
+            {
+                Log.Warn($"StartServiceWithRetry attempt {i + 1} failed: {ex.Message}");
+                Thread.Sleep(delayMs);
+            }
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// 在交互式用户会话中启动进程. 解决 Session 0 隔离问题:
+    /// Windows 服务在 Session 0 运行, 直接启动的子进程也在 Session 0,
+    /// 没有 GUI 桌面. WPF/WinForms 应用在 Session 0 会崩溃.
+    /// 此方法找到当前登录用户的 Session, 用 CreateProcessAsUser 在该 Session 启动.
+    /// </summary>
+    private bool StartProcessInUserSession(string exePath)
+    {
+        try
+        {
+            // 找到活跃的交互式用户 Session
+            int sessionId = -1;
+            foreach (var proc in Process.GetProcessesByName("explorer"))
+            {
+                try
+                {
+                    if (proc.SessionId > 0)
+                    {
+                        sessionId = proc.SessionId;
+                        break;
+                    }
+                }
+                catch { }
+            }
+
+            if (sessionId < 0)
+            {
+                Log.Error("No interactive user session found");
+                return false;
+            }
+
+            Log.Info($"Starting '{exePath}' in user session {sessionId}");
+
+            // 用 WTS API 获取用户 token, 然后 CreateProcessAsUser
+            // 简化方案: 用 schtasks 创建一次性任务, 在用户 Session 运行
+            string taskName = "MSIFlux_StartFMSvc";
+            try
+            {
+                // 先删除可能残留的同名任务
+                Process.Start(new ProcessStartInfo("schtasks")
+                {
+                    Arguments = $"/delete /tn \"{taskName}\" /f",
+                    CreateNoWindow = true, UseShellExecute = false
+                })!.WaitForExit(5000);
+            }
+            catch { }
+
+            // 用 cmd /c 执行 schtasks, 避免 PowerShell 引号转义问题
+            // /tr 参数: 路径含空格, 需要内外双引号: "\"path with spaces\""
+            string schtasksCreate = $"schtasks /create /tn \"{taskName}\" /tr \"\\\"{exePath}\\\"\" /sc once /st 00:00 /it /f";
+            var createP = Process.Start(new ProcessStartInfo("cmd.exe")
+            {
+                Arguments = $"/c \"{schtasksCreate}\"",
+                CreateNoWindow = true, UseShellExecute = false,
+                RedirectStandardOutput = true, RedirectStandardError = true
+            });
+            createP!.WaitForExit(5000);
+            if (createP.ExitCode != 0)
+            {
+                Log.Error($"schtasks create failed: exit={createP.ExitCode}");
+                return false;
+            }
+
+            // 立即运行任务
+            var runP = Process.Start(new ProcessStartInfo("cmd.exe")
+            {
+                Arguments = $"/c \"schtasks /run /tn \"{taskName}\"\"",
+                CreateNoWindow = true, UseShellExecute = false,
+                RedirectStandardOutput = true, RedirectStandardError = true
+            });
+            runP!.WaitForExit(5000);
+
+            // 清理任务
+            try
+            {
+                Process.Start(new ProcessStartInfo("cmd.exe")
+                {
+                    Arguments = $"/c \"schtasks /delete /tn \"{taskName}\" /f\"",
+                    CreateNoWindow = true, UseShellExecute = false
+                })!.WaitForExit(5000);
+            }
+            catch { }
+
+            Log.Info($"schtasks run exit={runP.ExitCode}");
+            return runP.ExitCode == 0;
+        }
+        catch (Exception ex)
+        {
+            Log.Error($"StartProcessInUserSession failed: {ex.Message}");
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// 确保 MSI 注册表键存在. Feature Manager Service 正常运行时会创建这些键,
+    /// 但 FM Service 是 WPF 应用, 在没有 MSI Center 的环境下会崩溃.
+    /// 此方法手动创建 GPU 切换所需的注册表路径和默认值.
+    /// </summary>
+    private void EnsureMsiRegistryKeys()
+    {
+        try
+        {
+            using var k = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(MsiRegPath, writable: false);
+            if (k is not null) return;  // 已存在
+        }
+        catch { }
+
+        // 创建完整的注册表路径
+        Log.Info("Creating MSI registry keys (FM Service not available)");
+        try
+        {
+            // MsiRegPath = "SOFTWARE\WOW6432Node\MSI\Feature Manager\Component\Base Module\User Scenario"
+            // 需要逐级创建每个子键
+            string[] parts = MsiRegPath.Split(new[] { '\\' }, StringSplitOptions.RemoveEmptyEntries);
+            Microsoft.Win32.RegistryKey? current = null;
+            for (int i = 0; i < parts.Length; i++)
+            {
+                if (i == 0)
+                {
+                    // 第一级: 在 HKLM 下创建
+                    current = Microsoft.Win32.Registry.LocalMachine.CreateSubKey(parts[i]);
+                }
+                else
+                {
+                    current = current?.CreateSubKey(parts[i]);
+                }
+
+                if (current is null)
+                {
+                    Log.Error($"Failed to create registry key at level {i}: {parts[i]}");
+                    return;
+                }
+            }
+
+            // 设置 GPU 切换所需的默认值
+            using var gpuKey = Microsoft.Win32.Registry.LocalMachine.CreateSubKey(MsiRegPath);
+            if (gpuKey is not null)
+            {
+                // 只在值不存在时设置默认值
+                if (gpuKey.GetValue("FW_GPU_CH") is null)
+                    gpuKey.SetValue("FW_GPU_CH", 0, Microsoft.Win32.RegistryValueKind.DWord);
+                if (gpuKey.GetValue("FW_CurrentNewGPU") is null)
+                    gpuKey.SetValue("FW_CurrentNewGPU", 0, Microsoft.Win32.RegistryValueKind.DWord);
+                Log.Info("MSI registry keys created successfully");
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Error($"Failed to create MSI registry keys: {ex.Message}");
+        }
+    }
+
     /// <param name="mode">0=Hybrid, 1=Discrete, 2=Eco/iGPU</param>
     /// <returns>true if the switch succeeded</returns>
     private bool SetGpuMode(int mode)
@@ -1194,21 +1397,12 @@ internal sealed class FanControlService : ServiceBase
                                 p!.WaitForExit(15000);
                                 Log.Info($"InstallUtil exit code: {p.ExitCode}");
 
-                                // InstallUtil 注册服务后, SCM 需要一点时间同步,
-                                // 立即启动会报 "Cannot start service" 错误.
-                                Thread.Sleep(3000);
-
-                                try
+                                // InstallUtil 注册服务后, 用 sc.exe start 启动,
+                                // 比 ServiceController.Start() 更可靠, 且带重试.
+                                msiFoundationReady = StartServiceWithRetry("MSI Foundation Service", 3, 5000);
+                                if (msiFoundationReady)
                                 {
-                                    using var svc2 = new ServiceController("MSI Foundation Service");
-                                    svc2.Start();
-                                    svc2.WaitForStatus(ServiceControllerStatus.Running, TimeSpan.FromSeconds(15));
-                                    msiFoundationReady = true;
                                     Log.Info("MSI Foundation Service installed and started");
-                                }
-                                catch (Exception ex2)
-                                {
-                                    Log.Error($"Failed to start after install: {ex2.Message}");
                                 }
                             }
                             catch (Exception ex3)
@@ -1255,14 +1449,11 @@ internal sealed class FanControlService : ServiceBase
                         });
                         p!.WaitForExit(15000);
 
-                        // InstallUtil 注册服务后, SCM 需要一点时间同步
-                        Thread.Sleep(3000);
-
-                        using var svc3 = new ServiceController("MSI Foundation Service");
-                        svc3.Start();
-                        svc3.WaitForStatus(ServiceControllerStatus.Running, TimeSpan.FromSeconds(10));
-                        msiFoundationReady = true;
-                        Log.Info("MSI Foundation Service installed and started");
+                        msiFoundationReady = StartServiceWithRetry("MSI Foundation Service", 3, 5000);
+                        if (msiFoundationReady)
+                        {
+                            Log.Info("MSI Foundation Service installed and started");
+                        }
                     }
                     catch (Exception ex4)
                     {
@@ -1289,38 +1480,20 @@ internal sealed class FanControlService : ServiceBase
             return false;
         }
 
-        // Step 2: Start Feature Manager Service.exe
+        // Step 2: Check Feature Manager Service.exe is running
+        // Feature Manager Service.exe 是 WPF 应用, 需要交互式桌面.
+        // 它必须由 GUI 侧 (用户会话) 启动, 服务端无法在 Session 0 启动 WPF 进程.
+        // 如果 FM Service 无法运行, 我们自己创建它负责的注册表键.
         string fmSvcPath = Path.Combine(featureManagerDir, "Feature Manager Service.exe");
         bool fmSvcRunning = Process.GetProcessesByName("Feature Manager Service").Length > 0;
         if (!fmSvcRunning)
         {
-            if (!File.Exists(fmSvcPath))
-            {
-                Log.Error($"Feature Manager Service.exe not found at {fmSvcPath}");
-                return false;
-            }
-            try
-            {
-                var psi = new ProcessStartInfo(fmSvcPath)
-                {
-                    CreateNoWindow = true,
-                    UseShellExecute = false
-                };
-                Process.Start(psi);
-                Thread.Sleep(2000);
-                fmSvcRunning = Process.GetProcessesByName("Feature Manager Service").Length > 0;
-                if (!fmSvcRunning)
-                {
-                    Log.Error("Feature Manager Service.exe exited immediately");
-                    return false;
-                }
-            }
-            catch (Exception ex)
-            {
-                Log.Error($"Failed to start Feature Manager Service.exe: {ex.Message}");
-                return false;
-            }
+            Log.Warn("Feature Manager Service.exe is not running (GUI should start it)");
         }
+
+        // Feature Manager Service 的核心职责之一是创建 MSI 注册表键.
+        // 如果它没在运行, 注册表键不存在, 我们自己创建.
+        EnsureMsiRegistryKeys();
 
         // Step 3: Write registry (FW_CurrentNewGPU must differ from FW_GPU_CH)
         try
