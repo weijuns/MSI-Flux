@@ -219,7 +219,15 @@ public static class Paths
     private static int _featureManagerExtracted = 0;
 
     /// <summary>
-    /// 把主程序集里嵌入的 FeatureManager/ 资源释放到 exe 同级目录.
+    /// FeatureManager 等运行时依赖文件的统一存放目录.
+    /// 单 exe 分发模式下, 用户可能把 exe 放在桌面, 不应在同级目录生成杂文件.
+    /// 统一放到 Program Files 下, 保持用户桌面干净.
+    /// </summary>
+    public static readonly string AppInstallDir = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "MSI Flux");
+
+    /// <summary>
+    /// 把主程序集里嵌入的 FeatureManager/ 资源释放到 AppInstallDir.
     /// 首次调用时执行, 后续调用是 no-op. 单个文件已存在时跳过.
     /// </summary>
     public static void EnsureFeatureManagerExtracted()
@@ -231,7 +239,7 @@ public static class Paths
             var asm = typeof(Paths).Assembly;
             string[] names = asm.GetManifestResourceNames();
 
-            string fmDir = Path.Combine(_executableDirectory, "FeatureManager");
+            string fmDir = Path.Combine(AppInstallDir, "FeatureManager");
             Directory.CreateDirectory(fmDir);
 
             foreach (string resName in names)

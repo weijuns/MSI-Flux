@@ -1138,14 +1138,15 @@ internal sealed class FanControlService : ServiceBase
 
         // Step 1: Ensure MSI Foundation Service (MSIAPService.exe) is running
         // Look for FeatureManager folder in multiple locations:
-        //   1. Bundled with MSIFlux (FeatureManager/ next to service dir)
-        //   2. System install (C:\Program Files (x86)\Feature Manager\)
-        //   3. Relative path (legacy fallback)
+        //   1. C:\Program Files\MSI Flux\FeatureManager (auto-extracted by GUI)
+        //   2. Bundled with MSIFlux (FeatureManager/ next to service dir)
+        //   3. System install (C:\Program Files (x86)\Feature Manager\)
         string serviceDir = AppContext.BaseDirectory;
         string[] featureManagerDirCandidates =
         {
+            @"C:\Program Files\MSI Flux\FeatureManager",                                          // Auto-extracted
             Path.GetFullPath(Path.Combine(serviceDir, "..", "..", "..", "..", "FeatureManager")),  // Bundled with MSIFlux
-            @"C:\Program Files (x86)\Feature Manager",                                        // System install
+            @"C:\Program Files (x86)\Feature Manager",                                            // System install
         };
         string featureManagerDir = featureManagerDirCandidates.First(d => File.Exists(Path.Combine(d, "MSIAPService.exe")))
             ?? featureManagerDirCandidates[0]; // Default to bundled path
