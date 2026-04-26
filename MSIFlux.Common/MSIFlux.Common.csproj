@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <AssemblyTitle>MSIFlux common code library</AssemblyTitle>
+    <OutputType>Library</OutputType>
+    <Title>MSIFlux common code library</Title>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWindowsForms>true</UseWindowsForms>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="System.Resources.Extensions" Version="8.0.0"/>
+    <PackageReference Include="System.ServiceProcess.ServiceController" Version="8.0.0"/>
+  </ItemGroup>
+</Project>

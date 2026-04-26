@@ -1,0 +1,254 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <!-- 
+    Microsoft ResX Schema 
+    
+    Version 2.0
+    
+    The primary goals of this format is to allow a simple XML format 
+    that is mostly human readable. The generation and parsing of the 
+    various data types are done through the TypeConverter classes 
+    associated with the data types.
+    
+    Example:
+    
+    ... ado.net/XML headers & schema ...
+    <resheader name="resmimetype">text/microsoft-resx</resheader>
+    <resheader name="version">2.0</resheader>
+    <resheader name="reader">System.Resources.ResXResourceReader, System.Windows.Forms, ...</resheader>
+    <resheader name="writer">System.Resources.ResXResourceWriter, System.Windows.Forms, ...</resheader>
+    <data name="Name1"><value>this is my long string</value><comment>this is a comment</comment></data>
+    <data name="Color1" type="System.Drawing.Color, System.Drawing">Blue</data>
+    <data name="Bitmap1" mimetype="application/x-microsoft.net.object.binary.base64">
+        <value>[base64 mime encoded serialized .NET Framework object]</value>
+    </data>
+    <data name="Icon1" type="System.Drawing.Icon, System.Drawing" mimetype="application/x-microsoft.net.object.bytearray.base64">
+        <value>[base64 mime encoded string representing a byte array form of the .NET Framework object]</value>
+        <comment>This is a comment</comment>
+    </data>
+                
+    There are any number of "resheader" rows that contain simple 
+    name/value pairs.
+    
+    Each data row contains a name, and value. The row also contains a 
+    type or mimetype. Type corresponds to a .NET class that support 
+    text/value conversion through the TypeConverter architecture. 
+    Classes that don't support this are serialized and stored with the 
+    mimetype set.
+    
+    The mimetype is used for serialized objects, and tells the 
+    ResXResourceReader how to depersist the object. This is currently not 
+    extensible. For a given mimetype the value must be set accordingly:
+    
+    Note - application/x-microsoft.net.object.binary.base64 is the format 
+    that the ResXResourceWriter will generate, however the reader can 
+    read any of the formats listed below.
+    
+    mimetype: application/x-microsoft.net.object.binary.base64
+    value   : The object must be serialized with 
+            : System.Runtime.Serialization.Formatters.Binary.BinaryFormatter
+            : and then encoded with base64 encoding.
+    
+    mimetype: application/x-microsoft.net.object.soap.base64
+    value   : The object must be serialized with 
+            : System.Runtime.Serialization.Formatters.Soap.SoapFormatter
+            : and then encoded with base64 encoding.
+
+    mimetype: application/x-microsoft.net.object.bytearray.base64
+    value   : The object must be serialized into a byte array 
+            : using a System.ComponentModel.TypeConverter
+            : and then encoded with base64 encoding.
+    -->
+  <xsd:schema id="root" xmlns="" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:msdata="urn:schemas-microsoft-com:xml-msdata">
+    <xsd:import namespace="http://www.w3.org/XML/1998/namespace" />
+    <xsd:element name="root" msdata:IsDataSet="true">
+      <xsd:complexType>
+        <xsd:choice maxOccurs="unbounded">
+          <xsd:element name="metadata">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" />
+              </xsd:sequence>
+              <xsd:attribute name="name" use="required" type="xsd:string" />
+              <xsd:attribute name="type" type="xsd:string" />
+              <xsd:attribute name="mimetype" type="xsd:string" />
+              <xsd:attribute ref="xml:space" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="assembly">
+            <xsd:complexType>
+              <xsd:attribute name="alias" type="xsd:string" />
+              <xsd:attribute name="name" type="xsd:string" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="data">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+                <xsd:element name="comment" type="xsd:string" minOccurs="0" msdata:Ordinal="2" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" use="required" msdata:Ordinal="1" />
+              <xsd:attribute name="type" type="xsd:string" msdata:Ordinal="3" />
+              <xsd:attribute name="mimetype" type="xsd:string" msdata:Ordinal="4" />
+              <xsd:attribute ref="xml:space" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="resheader">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" use="required" />
+            </xsd:complexType>
+          </xsd:element>
+        </xsd:choice>
+      </xsd:complexType>
+    </xsd:element>
+  </xsd:schema>
+  <resheader name="resmimetype">
+    <value>text/microsoft-resx</value>
+  </resheader>
+  <resheader name="version">
+    <value>2.0</value>
+  </resheader>
+  <resheader name="reader">
+    <value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <resheader name="writer">
+    <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <data name="cfgApplying" xml:space="preserve">
+    <value>正在应用MSI Flux配置...</value>
+  </data>
+  <data name="cfgInvalid" xml:space="preserve">
+    <value>最后应用的MSIFlux配置已过时/无效。
+请确保MSIFlux是最新的，然后运行MSIFlux配置编辑器并应用最新的配置。</value>
+  </data>
+  <data name="cfgLoading" xml:space="preserve">
+    <value>正在重新加载服务配置...</value>
+  </data>
+  <data name="cfgLoaded" xml:space="preserve">
+    <value>配置加载成功！</value>
+  </data>
+  <data name="cfgNotFound" xml:space="preserve">
+    <value>尚未应用任何配置。
+请运行MSIFlux配置编辑器并至少应用一次配置。</value>
+  </data>
+  <data name="drvLoad" xml:space="preserve">
+    <value>正在加载WinRing0驱动程序以访问EC...</value>
+  </data>
+  <data name="drvLoadFail" xml:space="preserve">
+    <value>无法加载WinRing0驱动程序，这是EC读写访问所必需的。
+请查看FAQ以获取常见修复方法。
+如果问题仍然存在，请打开错误报告并附上此日志。</value>
+  </data>
+  <data name="drvLoadSuccess" xml:space="preserve">
+    <value>WinRing0驱动程序加载成功！</value>
+  </data>
+  <data name="drvUnload" xml:space="preserve">
+    <value>正在卸载WinRing0驱动程序...</value>
+  </data>
+  <data name="errBadArgs" xml:space="preserve">
+    <value>收到参数数量/类型不正确的命令。
+有问题的命令：{0}
+参数：{1}</value>
+  </data>
+  <data name="errBadCmd" xml:space="preserve">
+    <value>收到未知命令：{0}</value>
+  </data>
+  <data name="errECRead" xml:space="preserve">
+    <value>无法从EC寄存器 0x{0:X2} 读取：{1}</value>
+  </data>
+  <data name="errECWrite" xml:space="preserve">
+    <value>无法写入EC寄存器 0x{0:X2}：{1}</value>
+  </data>
+  <data name="ipcConnect" xml:space="preserve">
+    <value>客户端已连接到服务（ID：{0}）</value>
+  </data>
+  <data name="ipcDC" xml:space="preserve">
+    <value>客户端已从服务断开连接（ID：{0}）</value>
+  </data>
+  <data name="svcDesc" xml:space="preserve">
+    <value>此服务提供将MSIFlux配置中的设置应用到计算机的功能。如果此服务的启动类型设置为手动，MSIFlux配置将不会在系统启动时应用。如果此服务被禁用，MSIFlux配置编辑器将不会运行，MSIFlux配置也不会被应用。</value>
+  </data>
+  <data name="svcECRead" xml:space="preserve">
+    <value>成功从EC寄存器 0x{0:X2} 读取（值：0x{1:X2}）。</value>
+  </data>
+  <data name="svcECWrote" xml:space="preserve">
+    <value>成功写入EC寄存器 0x{0:X2}。</value>
+  </data>
+  <data name="svcException" xml:space="preserve">
+    <value>发生未处理的异常：{0}</value>
+  </data>
+  <data name="svcStarted" xml:space="preserve">
+    <value>服务启动成功！</value>
+  </data>
+  <data name="svcStarting" xml:space="preserve">
+    <value>正在启动MSIFlux服务...</value>
+  </data>
+  <data name="svcStopped" xml:space="preserve">
+    <value>服务停止成功。</value>
+  </data>
+  <data name="svcStopping" xml:space="preserve">
+    <value>正在停止MSIFlux服务...</value>
+  </data>
+  <data name="svcWriteRegConfs" xml:space="preserve">
+    <value>正在写入自定义EC寄存器配置（{0}/{1}）...</value>
+  </data>
+  <data name="svcWriteFanConfs" xml:space="preserve">
+    <value>正在写入 `{0}` 的风扇配置文件（{1}/{2}）...</value>
+  </data>
+  <data name="svcWriteChgLim" xml:space="preserve">
+    <value>正在写入充电限制配置...</value>
+  </data>
+  <data name="svcWritePerfMode" xml:space="preserve">
+    <value>正在写入性能模式设置...</value>
+  </data>
+  <data name="svcWriteKeySwap" xml:space="preserve">
+    <value>正在写入Win/Fn键交换设置...</value>
+  </data>
+  <data name="svcSetKeyLight" xml:space="preserve">
+    <value>正在将键盘背光亮度设置为 {0}...</value>
+  </data>
+  <data name="svcGetKeyLight" xml:space="preserve">
+    <value>正在获取键盘背光亮度...</value>
+  </data>
+  <data name="ipcError" xml:space="preserve">
+    <value>发生IPC错误（连接到ID：{0}）：{1}</value>
+  </data>
+  <data name="errDirectRun" xml:space="preserve">
+    <value>这是一个服务；不打算直接运行（通过双击）。
+
+请运行 'MSIFlux.exe' 代替。</value>
+  </data>
+  <data name="DefaultDesc" xml:space="preserve">
+    <value>此计算机风扇的默认风扇配置文件。
+（由MSIFlux自动生成）</value>
+  </data>
+  <data name="svcReadModel" xml:space="preserve">
+    <value>正在获取计算机制造商和型号...</value>
+  </data>
+  <data name="svcReadProfs" xml:space="preserve">
+    <value>正在从EC获取风扇配置文件（{0}/{1}）...</value>
+  </data>
+  <data name="errReadModel" xml:space="preserve">
+    <value>无法获取计算机型号！</value>
+  </data>
+  <data name="errReadManufacturer" xml:space="preserve">
+    <value>无法获取计算机制造商！</value>
+  </data>
+  <data name="svcWake" xml:space="preserve">
+    <value>检测到从睡眠状态恢复，重新应用风扇配置文件...</value>
+  </data>
+  <data name="svcWriteFanMode" xml:space="preserve">
+    <value>正在写入风扇模式设置...</value>
+  </data>
+  <data name="svcGetFirmVer" xml:space="preserve">
+    <value>正在向客户端 {0} 发送固件版本...</value>
+  </data>
+  <data name="warnRegConf" xml:space="preserve">
+    <value>RegConfs已被弃用，将在未来版本中移除。
+所有MSI笔记本电脑不再需要RegConfs。
+更新到MSI Flux提供的配置以移除此警告。</value>
+  </data>
+</root>
