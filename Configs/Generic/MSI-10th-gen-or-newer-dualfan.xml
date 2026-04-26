@@ -1,8 +1,8 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
-<YAMDCC_Config xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" Ver="1">
+<MSIFlux_Config xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" Ver="1">
 	<Manufacturer>Micro-Star International Co., Ltd.</Manufacturer>
 	<Model>~Generic: 10th-gen Intel (or newer) - Dual-fan models</Model>
-	<Author>YAMDCC_Config</Author>
+	<Author>MSIFlux_Config</Author>
 	<FirmVerSupported>true</FirmVerSupported>
 	<FanConfs>
 		<FanConf>
@@ -256,4 +256,4 @@ If set to the default fan profile, uses an alternative fan profile.</Desc>
 		<MinVal>128</MinVal>
 		<MaxVal>131</MaxVal>
 	</KeyLightConf>
-</YAMDCC_Config>
+</MSIFlux_Config>

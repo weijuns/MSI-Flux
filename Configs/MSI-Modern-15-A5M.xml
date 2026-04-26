@@ -1,5 +1,5 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
-<YAMDCC_Config xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" Ver="1">
+<MSIFlux_Config xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" Ver="1">
 	<Manufacturer>Micro-Star International Co., Ltd.</Manufacturer>
 	<Model>Modern 15 A5M</Model>
 	<Author>tedomi2705</Author>
@@ -162,4 +162,4 @@ If set to the default fan profile, uses an alternative fan profile.</Desc>
 		<MinVal>128</MinVal>
 		<MaxVal>131</MaxVal>
 	</KeyLightConf>
-</YAMDCC_Config>
+</MSIFlux_Config>
