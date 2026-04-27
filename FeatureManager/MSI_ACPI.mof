@@ -1,0 +1,248 @@
+// MSI WMI ACPI schema for GPU switching
+// Register with: mofcomp MSI_ACPI.mof
+// This schema is normally installed by Feature Manager / MSI Center.
+// Without it, the MSI_ACPI and Package_32 WMI classes don't exist in root\wmi.
+
+#pragma AUTORECOVER
+#pragma namespace ("\\\\.\\root\\wmi")
+
+// Package data types (same GUID family ABBC0F6x)
+
+[Dynamic, Provider("WmiProv"),
+ guid("{ABBC0F60-8EA1-11d1-00A0-C90629100000}"),
+ Locale("MS\0x409"),
+ Description("This class contains the definition of the package used in other classes")]
+class Package {
+    [WmiDataId(1), write, read, Description("16 bytes of data")]
+    uint8 Bytes[16];
+};
+
+[Dynamic, Provider("WmiProv"),
+ guid("{ABBC0F61-8EA1-11d1-00A0-C90629100000}"),
+ Locale("MS\0x409"),
+ Description("This class contains the definition of the package used in other classes")]
+class Package_1 {
+    [WmiDataId(1), write, read, Description("1 bytes of data")]
+    uint8 Bytes[1];
+};
+
+[Dynamic, Provider("WmiProv"),
+ guid("{ABBC0F62-8EA1-11d1-00A0-C90629100000}"),
+ Locale("MS\0x409"),
+ Description("This class contains the definition of the package used in other classes")]
+class Package_10 {
+    [WmiDataId(1), write, read, Description("10 bytes of data")]
+    uint8 Bytes[10];
+};
+
+[Dynamic, Provider("WmiProv"),
+ guid("{ABBC0F63-8EA1-11d1-00A0-C90629100000}"),
+ Locale("MS\0x409"),
+ Description("This class contains the definition of the package used in other classes")]
+class Package_32 {
+    [WmiDataId(1), write, read, Description("32 bytes of data")]
+    uint8 Bytes[32];
+};
+
+// MSI data block classes
+
+[Dynamic, Provider("WmiProv"),
+ guid("{5B3CC38A-40D9-7245-8AE6-1145B751BE3F}"),
+ Locale("MS\0x409"),
+ Description("Event defined by MSI")]
+class MSI_Event {
+    [key, read] string InstanceName;
+    [read] boolean Active;
+    [WmiDataId(1), write, read, Description("Event defined by MSI")] uint32 MSIEvt;
+};
+
+[Dynamic, Provider("WmiProv"),
+ guid("{24418D6A-0A79-524C-9AB1-18B78CA68CE7}"),
+ Locale("MS\0x409"),
+ Description("Software")]
+class MSI_Software {
+    [key, read] string InstanceName;
+    [read] boolean Active;
+    [WmiDataId(1), write, read, Description("Software")] uint8 Software;
+};
+
+[Dynamic, Provider("WmiProv"),
+ guid("{4AFBD56B-9F91-8f49-81F5-995BA73822AF}"),
+ Locale("MS\0x409"),
+ Description("Device")]
+class MSI_Device {
+    [key, read] string InstanceName;
+    [read] boolean Active;
+    [WmiDataId(1), write, read, Description("Device")] uint8 Device;
+};
+
+[Dynamic, Provider("WmiProv"),
+ guid("{2D3CBA6C-1C9C-7f41-B54C-F5D5D580D482}"),
+ Locale("MS\0x409"),
+ Description("Power")]
+class MSI_Power {
+    [key, read] string InstanceName;
+    [read] boolean Active;
+    [WmiDataId(1), write, read, Description("Power")] uint8 Power;
+};
+
+[Dynamic, Provider("WmiProv"),
+ guid("{40BA026D-075D-cd4a-9710-F7C57347CAC9}"),
+ Locale("MS\0x409"),
+ Description("Master_Battery")]
+class MSI_Master_Battery {
+    [key, read] string InstanceName;
+    [read] boolean Active;
+    [WmiDataId(1), write, read, Description("Master_Battery")] sint16 Master_Battery;
+};
+
+[Dynamic, Provider("WmiProv"),
+ guid("{8DBCCF6E-9DB4-0e46-A3F2-99AFAAA77A7A}"),
+ Locale("MS\0x409"),
+ Description("Slave_Battery")]
+class MSI_Slave_Battery {
+    [key, read] string InstanceName;
+    [read] boolean Active;
+    [WmiDataId(1), write, read, Description("Slave_Battery")] sint16 Slave_Battery;
+};
+
+[Dynamic, Provider("WmiProv"),
+ guid("{BD2A216F-2FB9-a640-B807-DDDBAD656891}"),
+ Locale("MS\0x409"),
+ Description("CPU")]
+class MSI_CPU {
+    [key, read] string InstanceName;
+    [read] boolean Active;
+    [WmiDataId(1), write, read, Description("CPU")] uint8 CPU;
+};
+
+[Dynamic, Provider("WmiProv"),
+ guid("{1EC3EC7A-1E9B-e74a-9026-CF122B0BBD21}"),
+ Locale("MS\0x409"),
+ Description("VGA")]
+class MSI_VGA {
+    [key, read] string InstanceName;
+    [read] boolean Active;
+    [WmiDataId(1), write, read, Description("VGA")] uint8 VGA;
+};
+
+[Dynamic, Provider("WmiProv"),
+ guid("{A1753D7B-B621-de4a-B41A-55716A0ECE7A}"),
+ Locale("MS\0x409"),
+ Description("System")]
+class MSI_System {
+    [key, read] string InstanceName;
+    [read] boolean Active;
+    [WmiDataId(1), write, read, Description("System")] uint8 System;
+};
+
+[Dynamic, Provider("WmiProv"),
+ guid("{A1753D7C-B621-de4a-B41A-55716A0ECE7A}"),
+ Locale("MS\0x409"),
+ Description("AP")]
+class MSI_AP {
+    [key, read] string InstanceName;
+    [read] boolean Active;
+    [WmiDataId(1), write, read, Description("AP")] uint8 AP;
+};
+
+// Main ACPI method class
+
+[Dynamic, Provider("WmiProv"),
+ guid("{ABBC0F6E-8EA1-11d1-00A0-C90629100000}"),
+ Locale("MS\0x409"),
+ Description("Class used to operate methods on a package")]
+class MSI_ACPI {
+    [key, read]
+    string InstanceName;
+
+    [read]
+    boolean Active;
+
+    [Implemented, WmiMethodId(1)]
+    void GetPackage([in, out] Package_32 ref Data);
+
+    [Implemented, WmiMethodId(2)]
+    void SetPackage([in, out] Package_32 ref Data);
+
+    [Implemented, WmiMethodId(3)]
+    void Get_EC([in, out] Package_32 ref Data);
+
+    [Implemented, WmiMethodId(4)]
+    void Set_EC([in, out] Package_32 ref Data);
+
+    [Implemented, WmiMethodId(5)]
+    void Get_BIOS([in, out] Package_32 ref Data);
+
+    [Implemented, WmiMethodId(6)]
+    void Set_BIOS([in, out] Package_32 ref Data);
+
+    [Implemented, WmiMethodId(7)]
+    void Get_SMBUS([in, out] Package_32 ref Data);
+
+    [Implemented, WmiMethodId(8)]
+    void Set_SMBUS([in, out] Package_32 ref Data);
+
+    [Implemented, WmiMethodId(9)]
+    void Get_MasterBattery([in, out] Package_32 ref Data);
+
+    [Implemented, WmiMethodId(10)]
+    void Set_MasterBattery([in, out] Package_32 ref Data);
+
+    [Implemented, WmiMethodId(11)]
+    void Get_SlaveBattery([in, out] Package_32 ref Data);
+
+    [Implemented, WmiMethodId(12)]
+    void Set_SlaveBattery([in, out] Package_32 ref Data);
+
+    [Implemented, WmiMethodId(13)]
+    void Get_Temperature([in, out] Package_32 ref Data);
+
+    [Implemented, WmiMethodId(14)]
+    void Set_Temperature([in, out] Package_32 ref Data);
+
+    [Implemented, WmiMethodId(15)]
+    void Get_Thermal([in, out] Package_32 ref Data);
+
+    [Implemented, WmiMethodId(16)]
+    void Set_Thermal([in, out] Package_32 ref Data);
+
+    [Implemented, WmiMethodId(17)]
+    void Get_Fan([in, out] Package_32 ref Data);
+
+    [Implemented, WmiMethodId(18)]
+    void Set_Fan([in, out] Package_32 ref Data);
+
+    [Implemented, WmiMethodId(19)]
+    void Get_Device([in, out] Package_32 ref Data);
+
+    [Implemented, WmiMethodId(20)]
+    void Set_Device([in, out] Package_32 ref Data);
+
+    [Implemented, WmiMethodId(21)]
+    void Get_Power([in, out] Package_32 ref Data);
+
+    [Implemented, WmiMethodId(22)]
+    void Set_Power([in, out] Package_32 ref Data);
+
+    [Implemented, WmiMethodId(23)]
+    void Get_Debug([in, out] Package_32 ref Data);
+
+    [Implemented, WmiMethodId(24)]
+    void Set_Debug([in, out] Package_32 ref Data);
+
+    [Implemented, WmiMethodId(25)]
+    void Get_AP([in, out] Package_32 ref Data);
+
+    [Implemented, WmiMethodId(26)]
+    void Set_AP([in, out] Package_32 ref Data);
+
+    [Implemented, WmiMethodId(27)]
+    void Get_Data([in, out] Package_32 ref Data);
+
+    [Implemented, WmiMethodId(28)]
+    void Set_Data([in, out] Package_32 ref Data);
+
+    [Implemented, WmiMethodId(29)]
+    void Get_WMI([in, out] Package_32 ref Data);
+};

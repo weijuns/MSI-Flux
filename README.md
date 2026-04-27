@@ -15,7 +15,7 @@
 - **🌀 风扇控制** — 自定义 CPU/GPU 风扇转速曲线, 温度阈值调节, Cooler Boost 全速模式
 - **🚀 性能模式** — 省电 / 安静 / 均衡 / 加速 四档性能模式切换
 - **🔋 电池充电阈值** — 0-100% 自定义充电上限, 保护电池健康
-- **📦 单体 exe, 开箱即用** — 无需安装, 双击即用; 内置精简版 Feature Manager 自动提取到 `C:\ProgramData\MSI Flux\FeatureManager\`, 无需安装 MSI Center
+- **📦 单体 exe, 开箱即用** — 双击即用; 内置精简版 Feature Manager 自动提取到 `C:\ProgramData\MSI Flux\FeatureManager\`
 - **🪶 极致轻量** — 实测运行时后台内存仅占用 ~10MB, 对比 MSI Center ~950MB
 - **🎨 现代化 UI** — 参考 [G-Helper](https://github.com/seerge/g-helper) 设计的简洁界面
 
@@ -65,14 +65,25 @@ FW_SupportDiscrete — 是否支持独显
 
 ### 依赖服务
 
-GPU 切换需要两个 MSI 后台服务配合:
+GPU 切换依赖 MSI 的 WMI ACPI 基础设施, 需要安装 **Feature Manager** (MSI Center 的组件):
 
-| 服务 | 说明 |
+| 组件 | 说明 |
 |---|---|
-| MSI Foundation Service (MSIAPService.exe) | Windows 服务, 必须先安装并启动 |
-| Feature Manager Service.exe | 依赖 MSIAPService, 单独运行会立即退出 |
+| Feature Manager | 必须安装, 提供 WMI ACPI 类注册和内核驱动支持 |
+| MSI Foundation Service (MSIAPService.exe) | Windows 服务, 首次切换时自动安装并启动 |
+| Micro Star SCM | MSI Center 主服务, MSI Flux 会自动禁用此服务以避免冲突 |
 
-MSI Flux 内置了精简版 FeatureManager 目录 (仅 4 个必要文件), 首次切换时会自动通过 `InstallUtil` 安装 MSI Foundation Service。
+### 安装步骤
+
+1. 从 MSI 官网下载并安装 **MSI Center** (安装时选择 Feature Manager 组件)
+2. 安装完成后, MSI Flux 会自动:
+   - 禁用 Micro Star SCM 服务 (避免冲突)
+   - 将 MSI Foundation Service 设为手动启动 (不自启)
+   - 首次 GPU 切换时按需启动 MSI Foundation Service
+3. 正常使用 MSI Flux 即可, FM 相关服务仅在 GPU 切换时临时启动
+
+> **重要**: 不要卸载 Feature Manager, 否则 WMI ACPI 方法调用将永久挂起, 导致 GPU 切换失败。
+> MSI Flux 已内置精简版 FeatureManager 文件和 MOF schema, 可在 WMI 仓库损坏时自动修复。
 
 > 详细的逆向工程过程和接口文档, 请参考 [MSI GPUSwitch](https://github.com/weijuns/MSI-GPUSwitch) 项目。
 
@@ -153,6 +164,7 @@ RPM ReadReg           — 风扇 RPM 读取寄存器
 - Windows 10/11 (64-bit)
 - .NET 8.0 Runtime
 - MSI 笔记本
+- **Feature Manager** (MSI Center 组件, 必须安装以支持 GPU 切换)
 - 默认配置文件: `MSI-10th-gen-or-newer-dualfan.xml` (适用于 10 代及更新双风扇机型)
 
 ### 构建

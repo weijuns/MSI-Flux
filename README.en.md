@@ -15,7 +15,7 @@
 - **🌀 Fan Control** — Custom CPU/GPU fan speed curves, temperature threshold adjustment, Cooler Boost full-speed mode
 - **🚀 Performance Modes** — Eco / Silent / Balanced / Turbo four-tier performance mode switching
 - **🔋 Battery Charge Threshold** — 0-100% custom charge limit to preserve battery health
-- **📦 Single exe, out of the box** — No installation needed; just double-click. Bundled minimal Feature Manager service auto-extracts to `C:\ProgramData\MSI Flux\FeatureManager\`, no MSI Center required
+- **📦 Single exe, out of the box** — Just double-click. Bundled minimal Feature Manager auto-extracts to `C:\ProgramData\MSI Flux\FeatureManager\`
 - **🪶 Ultra lightweight** — Runtime memory usage only ~10MB, compared to MSI Center's ~950MB
 - **🎨 Modern UI** — Clean interface design inspired by [G-Helper](https://github.com/seerge/g-helper)
 
@@ -65,14 +65,25 @@ FW_SupportDiscrete — Whether discrete GPU is supported
 
 ### Required Services
 
-GPU switching requires two MSI background services:
+GPU switching depends on MSI's WMI ACPI infrastructure, requiring **Feature Manager** (an MSI Center component) to be installed:
 
-| Service | Description |
+| Component | Description |
 |---|---|
-| MSI Foundation Service (MSIAPService.exe) | Windows service, must be installed and started first |
-| Feature Manager Service.exe | Depends on MSIAPService, exits immediately if run alone |
+| Feature Manager | Must be installed; provides WMI ACPI class registration and kernel driver support |
+| MSI Foundation Service (MSIAPService.exe) | Windows service, auto-installed and started on first GPU switch |
+| Micro Star SCM | MSI Center main service; MSI Flux automatically disables it to avoid conflicts |
 
-MSI Flux bundles a minimal FeatureManager directory (only 4 essential files). On first GPU switch, it automatically installs MSI Foundation Service via `InstallUtil`.
+### Installation Steps
+
+1. Download and install **MSI Center** from MSI's official website (select Feature Manager component during installation)
+2. After installation, MSI Flux will automatically:
+   - Disable Micro Star SCM service (to avoid conflicts)
+   - Set MSI Foundation Service to Manual start (no auto-start)
+   - Start MSI Foundation Service on-demand during GPU switching
+3. Use MSI Flux normally; FM-related services only start temporarily during GPU switching
+
+> **Important**: Do not uninstall Feature Manager, or WMI ACPI method calls will hang permanently, causing GPU switching to fail.
+> MSI Flux bundles a minimal FeatureManager directory and MOF schema for automatic WMI repository repair.
 
 > For detailed reverse engineering process and API documentation, see the [MSI GPUSwitch](https://github.com/weijuns/MSI-GPUSwitch) project.
 
@@ -153,6 +164,7 @@ Write flow: `EC.WriteByte(Reg, Value)` → WinRing0 driver → EC hardware → B
 - Windows 10/11 (64-bit)
 - .NET 8.0 Runtime
 - MSI laptop
+- **Feature Manager** (MSI Center component, required for GPU switching)
 - Default config file: `MSI-10th-gen-or-newer-dualfan.xml` (for 10th-gen and newer dual-fan models)
 
 ### Build

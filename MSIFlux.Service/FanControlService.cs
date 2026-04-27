@@ -1339,6 +1339,53 @@ internal sealed class FanControlService : ServiceBase
         };
         Log.Info($"Setting GPU mode to {modeName}");
 
+        // Step 0: Configure FM services - disable conflicting services, set MSI Foundation to manual
+        try
+        {
+            // Disable Micro Star SCM (MSI Center service) - conflicts with MSI Flux
+            using var scmSvc = new ServiceController("Micro Star SCM");
+            bool needDisable = false;
+            if (scmSvc.Status != ServiceControllerStatus.Stopped)
+            {
+                Log.Info("Stopping Micro Star SCM service...");
+                scmSvc.Stop();
+                scmSvc.WaitForStatus(ServiceControllerStatus.Stopped, TimeSpan.FromSeconds(10));
+                needDisable = true;
+            }
+            if (scmSvc.StartType != ServiceStartMode.Disabled)
+                needDisable = true;
+            if (needDisable)
+            {
+                Log.Info("Disabling Micro Star SCM service...");
+                using var sc = Process.Start(new ProcessStartInfo("sc.exe")
+                {
+                    Arguments = "config \"Micro Star SCM\" start= disabled",
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                });
+                sc!.WaitForExit(5000);
+            }
+        }
+        catch { /* Service not found or already stopped */ }
+
+        try
+        {
+            // Ensure MSI Foundation Service is set to Manual (not auto-start)
+            using var mfsSvc = new ServiceController("MSI Foundation Service");
+            if (mfsSvc.StartType != ServiceStartMode.Manual)
+            {
+                Log.Info("Setting MSI Foundation Service to Manual start...");
+                using var sc = Process.Start(new ProcessStartInfo("sc.exe")
+                {
+                    Arguments = "config \"MSI Foundation Service\" start= demand",
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                });
+                sc!.WaitForExit(5000);
+            }
+        }
+        catch { /* Service not found yet */ }
+
         // Step 1: Ensure MSI Foundation Service (MSIAPService.exe) is running
         // Look for FeatureManager folder in multiple locations:
         //   1. C:\ProgramData\MSI Flux\FeatureManager (auto-extracted by GUI)
@@ -1521,12 +1568,72 @@ internal sealed class FanControlService : ServiceBase
             return false;
         }
 
-        // Step 4: Read Get_AP(0) to get current state
+        // Step 4+: WMI ACPI calls
+        // MSI_ACPI WMI 类需要通过 mofcomp 注册 MOF schema.
+        // Feature Manager 安装时会注册, 卸载后会丢失.
+        // 我们自带 MSI_ACPI.mof, 如果类不存在则自动注册.
+        bool msiAcpiExists = false;
+        try
+        {
+            using var checkSearcher = new ManagementObjectSearcher(WmiScope, $"SELECT * FROM {AcpiClass}");
+            foreach (ManagementObject _ in checkSearcher.Get()) { msiAcpiExists = true; break; }
+        }
+        catch (Exception ex)
+        {
+            Log.Warn($"MSI_ACPI WMI class check failed: {ex.Message}");
+        }
+
+        if (!msiAcpiExists)
+        {
+            Log.Warn("MSI_ACPI WMI class not found or no instances. Registering MOF schema...");
+            string mofPath = Path.Combine(featureManagerDir, "MSI_ACPI.mof");
+            if (File.Exists(mofPath))
+            {
+                try
+                {
+                    using var p = Process.Start(new ProcessStartInfo("mofcomp.exe")
+                    {
+                        Arguments = $"\"{mofPath}\"",
+                        UseShellExecute = false,
+                        CreateNoWindow = true,
+                        RedirectStandardOutput = true,
+                        RedirectStandardError = true
+                    });
+                    p!.WaitForExit(10000);
+                    string output = p.StandardOutput.ReadToEnd();
+                    if (p.ExitCode == 0)
+                    {
+                        Log.Info("MSI_ACPI MOF schema registered successfully");
+                        // Re-check after registration
+                        try
+                        {
+                            using var recheck = new ManagementObjectSearcher(WmiScope, $"SELECT * FROM {AcpiClass}");
+                            foreach (ManagementObject _ in recheck.Get()) { msiAcpiExists = true; break; }
+                        }
+                        catch { }
+                    }
+                    else
+                    {
+                        Log.Warn($"mofcomp exit code: {p.ExitCode}, output: {output}");
+                    }
+                }
+                catch (Exception ex2)
+                {
+                    Log.Warn($"mofcomp failed: {ex2.Message}");
+                }
+            }
+            else
+            {
+                Log.Warn($"MOF file not found at {mofPath}");
+            }
+        }
+
         byte[]? ap0 = WmiCallGet("Get_AP", 0x00);
         if (ap0 is null || ap0.Length < 2 || ap0[0] != 0x01)
         {
-            Log.Error("Get_AP(0) failed or returned unexpected data");
-            return false;
+            Log.Warn("WMI Get_AP not available after MOF registration attempt. Registry-only mode: reboot required.");
+            Log.Info($"GPU mode switch to {modeName} completed (registry-only). Reboot required.");
+            return true;
         }
         Log.Info($"Get_AP(0) byte[1]=0x{ap0[1]:X2}");
 

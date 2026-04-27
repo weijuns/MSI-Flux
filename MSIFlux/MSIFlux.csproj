@@ -77,6 +77,33 @@
     <EmbeddedResource Include="..\FeatureManager\MSIWMIACPI2.dll">
       <LogicalName>FeatureManager/MSIWMIACPI2.dll</LogicalName>
     </EmbeddedResource>
+    <EmbeddedResource Include="..\FeatureManager\Microsoft.Expression.Drawing.dll">
+      <LogicalName>FeatureManager/Microsoft.Expression.Drawing.dll</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="..\FeatureManager\MsiHid.dll">
+      <LogicalName>FeatureManager/MsiHid.dll</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="..\FeatureManager\NamedPipeClientLib.dll">
+      <LogicalName>FeatureManager/NamedPipeClientLib.dll</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="..\FeatureManager\Newtonsoft.Json.dll">
+      <LogicalName>FeatureManager/Newtonsoft.Json.dll</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="..\FeatureManager\UEFIVaribleDll.dll">
+      <LogicalName>FeatureManager/UEFIVaribleDll.dll</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="..\FeatureManager\Feature Manager Service.exe.config">
+      <LogicalName>FeatureManager/Feature Manager Service.exe.config</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="..\FeatureManager\MSI_ACPI.mof">
+      <LogicalName>FeatureManager/MSI_ACPI.mof</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="..\FeatureManager\KernCoreLib64.Sys">
+      <LogicalName>FeatureManager/KernCoreLib64.Sys</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="..\FeatureManager\KernCoreLib64.dll">
+      <LogicalName>FeatureManager/KernCoreLib64.dll</LogicalName>
+    </EmbeddedResource>
   </ItemGroup>
 
   <ItemGroup>
