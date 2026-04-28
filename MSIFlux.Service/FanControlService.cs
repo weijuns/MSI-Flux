@@ -1398,9 +1398,22 @@ internal sealed class FanControlService : ServiceBase
             Path.GetFullPath(Path.Combine(serviceDir, "..", "..", "..", "..", "FeatureManager")),  // Bundled with MSIFlux
             @"C:\Program Files (x86)\Feature Manager",                                            // System install
         };
-        string featureManagerDir = featureManagerDirCandidates.First(d => File.Exists(Path.Combine(d, "MSIAPService.exe")))
+        string featureManagerDir = featureManagerDirCandidates.FirstOrDefault(d => File.Exists(Path.Combine(d, "MSIAPService.exe")))
             ?? featureManagerDirCandidates[0]; // Default to bundled path
         string msiApSvcPath = Path.Combine(featureManagerDir, "MSIAPService.exe");
+
+        // Step 0.5: Ensure WMI ACPI bootstrap (msiapcfg.dll + MofImagePath) is installed.
+        // This is the *real* foundation for WMI ACPI calls — without it, even FM can't make
+        // Get_AP/Set_Data work. With it, we don't need FM installed at all.
+        // First-time install requires a reboot before WMI calls actually succeed.
+        try
+        {
+            WmiAcpiBootstrap.EnsureInstalled(featureManagerDir, Log);
+        }
+        catch (Exception ex)
+        {
+            Log.Warn($"WMI ACPI bootstrap install failed (non-fatal): {ex.Message}");
+        }
         bool msiFoundationReady = false;
         try
         {
@@ -1688,7 +1701,22 @@ internal sealed class FanControlService : ServiceBase
             Log.Warn("BIOS did not acknowledge (bit1 not set), skipping Set_Data(0xBE)");
         }
 
-        Log.Info($"GPU mode switch to {modeName} completed. Reboot required.");
+        // Step 10: Commit UEFI variable MsiDCVarData (BIOS POST 真正读取的提交点).
+        // 这是 Feature Manager Service.WatcherACAIntelligentCH_EventArrived 监听 AC 事件时调用的
+        // Set_BIOS_Flag_Of_New_GPU_Switch 方法所做的事 — 写 UEFI 变量 byte[5] 的 bit0/bit1.
+        // 没有这一步, 即使 EC 写入成功, BIOS POST 也不会切换 GPU MUX.
+        try
+        {
+            bool uefiOk = UefiVariable.CommitGpuMode(mode, Log);
+            if (!uefiOk)
+                Log.Warn("UEFI MsiDCVarData write failed. GPU MUX may not switch on cold boot.");
+        }
+        catch (Exception ex)
+        {
+            Log.Warn($"UEFI commit threw: {ex.Message}");
+        }
+
+        Log.Info($"GPU mode switch to {modeName} completed. *Cold boot* (shutdown + power on) required, NOT a warm reboot.");
         return true;
     }
 
