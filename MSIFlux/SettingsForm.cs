@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
@@ -335,7 +335,9 @@ namespace MSIFlux.GUI
                 VisualiseGpuMode(mode);
 
                 var rebootResult = MessageBox.Show(
-                    $"{modeName} 切换命令执行成功，MSI Foundation Service / Feature Manager Service 已通过检测。\n是否立即重启生效？",
+                    $"{modeName} 切换命令执行成功。\n\n" +
+                    "⚠️ BIOS 需要冷启动 (关机+开机) 才能应用 GPU MUX 切换，热重启无效。\n\n" +
+                    "是否立即关机？ (关机后请手动开机)",
                     Strings.GPUMode,
                     MessageBoxButtons.YesNo,
                     MessageBoxIcon.Warning,
@@ -345,7 +347,7 @@ namespace MSIFlux.GUI
                 {
                     try
                     {
-                        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("shutdown", "/r /t 0")
+                        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("shutdown", "-f -s -t 0")
                         {
                             CreateNoWindow = true,
                             UseShellExecute = false

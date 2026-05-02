@@ -1,4 +1,4 @@
-﻿// This file is part of MSIFlux, based on YAMDCC.
+// This file is part of MSIFlux, based on YAMDCC.
 // Original Copyright © 2023-2025 Sparronator9999
 // Modifications Copyright © 2026 weijuns.
 //
@@ -1327,6 +1327,70 @@ internal sealed class FanControlService : ServiceBase
         }
     }
 
+    /// <summary>
+    /// 写 OS 在线心跳 (EC 0xD9 bit0=1).
+    /// MSIAPService.OnStart 的关键握手, 让 BIOS 知道 OS 端就绪.
+    /// </summary>
+    private bool WriteOsHeartbeat()
+    {
+        try
+        {
+            if (!LogECReadByte(0xD9, out byte cur))
+            {
+                Log.Warn("OS heartbeat: Get_Data(0xD9) read failed");
+                return false;
+            }
+            byte target = (byte)(cur | 0x01);
+            if (cur == target)
+            {
+                Log.Info("OS heartbeat: EC[0xD9] bit0 already 1");
+                return true;
+            }
+            Log.Info($"OS heartbeat: EC[0xD9] 0x{cur:X2} -> 0x{target:X2}");
+            return LogECWriteByte(0xD9, target);
+        }
+        catch (Exception ex)
+        {
+            Log.Warn($"OS heartbeat failed: {ex.Message}");
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// 切换完成后清理 MSI 辅助进程, 避免关机时 FM Service 抛出 0xe0434352 异常.
+    /// </summary>
+    private void CleanupMsiHelpers()
+    {
+        foreach (var proc in Process.GetProcessesByName("Feature Manager Service"))
+        {
+            try
+            {
+                proc.Kill();
+                proc.WaitForExit(3000);
+                Log.Info("Terminated Feature Manager Service.exe");
+            }
+            catch (Exception ex)
+            {
+                Log.Warn($"Kill FM Service failed: {ex.Message}");
+            }
+        }
+
+        try
+        {
+            using var svc = new ServiceController("MSI Foundation Service");
+            if (svc.Status != ServiceControllerStatus.Stopped)
+            {
+                svc.Stop();
+                svc.WaitForStatus(ServiceControllerStatus.Stopped, TimeSpan.FromSeconds(10));
+                Log.Info("Stopped MSI Foundation Service");
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Warn($"Stop MSI Foundation Service failed: {ex.Message}");
+        }
+    }
+
     /// <param name="mode">0=Hybrid, 1=Discrete, 2=Eco/iGPU</param>
     /// <returns>true if the switch succeeded</returns>
     private bool SetGpuMode(int mode)
@@ -1555,6 +1619,9 @@ internal sealed class FanControlService : ServiceBase
         // 如果它没在运行, 注册表键不存在, 我们自己创建.
         EnsureMsiRegistryKeys();
 
+        if (!WriteOsHeartbeat())
+            Log.Warn("OS heartbeat write failed, continuing with switch.");
+
         // Step 3: Write registry (FW_CurrentNewGPU must differ from FW_GPU_CH)
         try
         {
@@ -1717,6 +1784,10 @@ internal sealed class FanControlService : ServiceBase
         }
 
         Log.Info($"GPU mode switch to {modeName} completed. *Cold boot* (shutdown + power on) required, NOT a warm reboot.");
+
+        try { CleanupMsiHelpers(); }
+        catch (Exception ex) { Log.Warn($"CleanupMsiHelpers failed: {ex.Message}"); }
+
         return true;
     }
 

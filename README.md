@@ -3,7 +3,7 @@
 **[English](README.en.md)** | **中文**
 
 > 基于 [YAMDCC](https://codeberg.org/Sparronator9999/YAMDCC) 深度定制的 MSI 笔记本控制工具,
-> 新增 **GPU 三模式切换**、现代化 UI, 并内置 MSI Feature Manager 服务依赖。
+> 新增 **GPU 三模式切换**、现代化 UI, 并内置 WMI ACPI 引导器和 Feature Manager 精简文件。
 >
 > 🎯 **单体 exe, 无需安装** — 双击即用, 实测运行时后台内存仅占用 ~10MB, 非常清爽。
 
@@ -26,7 +26,7 @@
 | 功能 | YAMDCC 原版 | MSI Flux |
 |---|---|---|
 | GPU 模式切换 | ❌ 研究停滞 (Roadmap v2.1) | ✔ 三模式 (Hybrid/Discrete/Eco) |
-| GPU 切换底层 | 无 | WMI ACPI Set_Data + 注册表 + MSI 服务 |
+| GPU 切换底层 | 无 | WMI ACPI + 注册表 + UEFI 变量 + 自动服务管理 |
 | 风扇控制 | ✔ | ✔ |
 | 温度阈值控制 | ✔ | ✔ |
 | 性能模式 | ✔ | ✔ |
@@ -39,51 +39,55 @@
 
 ## 🔧 GPU 切换底层接口
 
-GPU 模式切换是本项目最核心的新增功能, 其实现完全基于逆向工程 MSI Center 的切换流程:
+GPU 模式切换是本项目最核心的新增功能, 其实现完全基于逆向工程 MSI Center 的切换流程。
 
-### 注册表操作
+### 核心原理: 完全不依赖 Feature Manager 安装 (2026-05-02 突破)
 
-```
-路径: HKLM\SOFTWARE\WOW6432Node\MSI\Feature Manager\Component\Base Module\User Scenario
-
-FW_GPU_CH        — 目标 GPU 模式 (0=Hybrid, 1=Discrete, 2=Eco)
-FW_CurrentNewGPU — 必须与 FW_GPU_CH 不同, 才能触发切换
-FW_SupportNewGPU — 是否支持独显直连
-FW_SupportUMA    — 是否支持核显模式
-FW_SupportDiscrete — 是否支持独显
-```
-
-### WMI ACPI 调用序列
+通过逆向 `wmiacpi.sys` 驱动的加载机制, 发现只需两个条件即可让 WMI ACPI 方法工作:
 
 ```
-1. Get_AP(0x00)           → 读取当前 ACPI 状态
-2. Set_Data(0xD1, mod)    → 写入 GPU 模式持久化位 (mod = byte[1] & ~0x03 | 0x01)
-3. 等待 2 秒               → BIOS 处理
-4. Get_AP(0x00)           → 重新读取, 检查 byte[2] bit1 是否为 1 (BIOS 确认)
-5. Set_Data(0xBE, 0x02)   → 发送确认命令, 完成切换
+msiapcfg.dll (16KB 的 BMF-in-PE 文件, 放到 C:\Windows\SysWOW64\)  ←  内置在程序中, 首次运行自动提取并复制
+MofImagePath 注册表值 (指向上述 dll)                                  ←  首次运行自动设置
 ```
 
-### 依赖服务
+**MSI Flux 首次 GPU 切换时自动完成引导** (`WmiAcpiBootstrap.EnsureInstalled`), 之后 WMI ACPI 调用即可正常工作。首次引导后需重启一次以激活 WMI 绑定。
 
-GPU 切换依赖 MSI 的 WMI ACPI 基础设施, 需要安装 **Feature Manager** (MSI Center 的组件):
+### 完整切换公式
+
+```
+EC 寄存器 0xD1/0xBE  →  写入 GPU 模式位 + BIOS 确认
++ 注册表 FW_GPU_CH / FW_CurrentNewGPU  →  MSI 服务协作 (Discrete→Hybrid 需要 MSIAPService)
++ UEFI 变量 MsiDCVarData byte[5]  →  BIOS POST 读取的真正 MUX 路由
+= 关机再开机 (冷启动, S5→S0)  →  BIOS POST 配置 MUX, GPU 切换完成
+```
+
+### 切换流程 (10 步)
+
+```
+Step 0.   禁用 Micro Star SCM 服务 (避免冲突); MSI Foundation Service 设为手动启动
+Step 0.5  WMI ACPI 引导: 复制 msiapcfg.dll + 设置 MofImagePath (首次, 之后自动跳过)
+Step 1.   按需启动 MSI Foundation Service (MSIAPService.exe)
+Step 2.   写注册表: FW_GPU_CH=target, FW_CurrentNewGPU=cur (必须不同才能触发)
+Step 3.   Get_AP(0x00) → 读取当前 ACPI 状态
+Step 4.   Set_Data(0xD1, mod) → 写入 GPU 模式持久化位 (mod = byte[1] & ~0x03 | 0x01)
+Step 5.   等待 2 秒 → BIOS 处理
+Step 6.   Get_AP(0x00) → 重新读取, 检查 byte[2] bit1 是否为 1 (BIOS 确认)
+Step 7.   Set_Data(0xBE, 0x02) → 发送确认命令, 完成 EC 层切换
+Step 8.   写 UEFI 变量 MsiDCVarData byte[5] → BIOS POST 读取的真正提交点
+Step 9.   清理: Kill FM Service 进程 + Stop MSIAPService (防止关机 0xe0434352 崩溃)
+```
+
+> **必须冷启动**: 切换完成后需 **关机再开机** (S5→S0), 热重启 (S4→S0) 无效。
+> 因为 EC 在重启期间不断电, BIOS 跳过 MUX 重配置。
+
+### 依赖服务 (运行时自动管理)
 
 | 组件 | 说明 |
 |---|---|
-| Feature Manager | 必须安装, 提供 WMI ACPI 类注册和内核驱动支持 |
-| MSI Foundation Service (MSIAPService.exe) | Windows 服务, 首次切换时自动安装并启动 |
+| WMI ACPI 引导器 | 内置 `msiapcfg.dll`, 首次切换时自动复制到 SysWOW64 + 设置 `MofImagePath` |
+| MSI Foundation Service (MSIAPService.exe) | Windows 服务, 首次切换时自动安装并启动, 切换完成后自动停止 |
 | Micro Star SCM | MSI Center 主服务, MSI Flux 会自动禁用此服务以避免冲突 |
-
-### 安装步骤
-
-1. 从 MSI 官网下载并安装 **MSI Center** (安装时选择 Feature Manager 组件)
-2. 安装完成后, MSI Flux 会自动:
-   - 禁用 Micro Star SCM 服务 (避免冲突)
-   - 将 MSI Foundation Service 设为手动启动 (不自启)
-   - 首次 GPU 切换时按需启动 MSI Foundation Service
-3. 正常使用 MSI Flux 即可, FM 相关服务仅在 GPU 切换时临时启动
-
-> **重要**: 不要卸载 Feature Manager, 否则 WMI ACPI 方法调用将永久挂起, 导致 GPU 切换失败。
-> MSI Flux 已内置精简版 FeatureManager 文件和 MOF schema, 可在 WMI 仓库损坏时自动修复。
+| Feature Manager | **无需安装**; 内置精简版文件, WMI 仓库损坏时自动用 MOF schema 修复 |
 
 > 详细的逆向工程过程和接口文档, 请参考 [MSI GPUSwitch](https://github.com/weijuns/MSI-GPUSwitch) 项目。
 
@@ -164,7 +168,7 @@ RPM ReadReg           — 风扇 RPM 读取寄存器
 - Windows 10/11 (64-bit)
 - .NET 8.0 Runtime
 - MSI 笔记本
-- **Feature Manager** (MSI Center 组件, 必须安装以支持 GPU 切换)
+- 首次使用需运行一次 GPU 切换 (自动完成 WMI ACPI 引导), 然后重启一次以激活
 - 默认配置文件: `MSI-10th-gen-or-newer-dualfan.xml` (适用于 10 代及更新双风扇机型)
 
 ### 构建
