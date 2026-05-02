@@ -68,12 +68,17 @@ namespace MSIFlux.GUI
             Text = Properties.Strings.ExtraSettings;
 
             checkWinFnSwap.CheckedChanged += CheckWinFnSwap_CheckedChanged;
+            checkAutoEcoOnBattery.CheckedChanged += CheckAutoEcoOnBattery_CheckedChanged;
 
             buttonStopMSIService.Click += ButtonStopMSIService_Click;
             buttonStartMSIService.Click += ButtonStartMSIService_Click;
 
             buttonStopFanControl.Click += ButtonStopFanControl_Click;
             buttonStartFanControl.Click += ButtonStartFanControl_Click;
+
+            buttonExportConfig.Click += ButtonExportConfig_Click;
+            buttonImportConfig.Click += ButtonImportConfig_Click;
+            buttonPowerPlan.Click += ButtonPowerPlan_Click;
 
             // Language combo
             InitLanguageCombo();
@@ -90,55 +95,78 @@ namespace MSIFlux.GUI
             UpdateFanControlStatus();
         }
 
-        private void Extra_Load(object? sender, EventArgs e)
+        private async void Extra_Load(object? sender, EventArgs e)
         {
             LoadConfig();
-            UpdateMSIServiceStatus();
-            UpdateFanControlStatus();
+            var msiTask = Task.Run(() => CheckMSIServiceRunning());
+            var fanTask = Task.Run(() => ServiceManager.IsRunning());
+
+            try
+            {
+                bool msiRunning = await msiTask;
+                UpdateMSIServiceStatusUI(msiRunning);
+            }
+            catch (Exception ex)
+            {
+                Logger.WriteLine($"更新 MSI 服务状态失败: {ex.Message}");
+                labelMSIServiceStatus.Text = Properties.Strings.MSIServiceUnknown;
+            }
+
+            try
+            {
+                bool fanRunning = await fanTask;
+                UpdateFanControlStatusUI(fanRunning);
+            }
+            catch (Exception ex)
+            {
+                Logger.WriteLine($"更新风扇控制状态失败: {ex.Message}");
+                labelServiceStatus.Text = Properties.Strings.FanControlStatusUnknown;
+                labelServiceStatus.ForeColor = System.Drawing.Color.Gray;
+            }
         }
 
         private void UpdateMSIServiceStatus()
         {
             try
             {
-                bool isRunning = false;
-
-                foreach (var process in PROCESSES)
-                {
-                    if (IsProcessRunning(process.Value))
-                    {
-                        isRunning = true;
-                        break;
-                    }
-                }
-
-                if (!isRunning)
-                {
-                    foreach (var service in SERVICES)
-                    {
-                        if (MSIFlux.Common.Utils.ServiceExists(service.Value) && MSIFlux.Common.Utils.ServiceRunning(service.Value))
-                        {
-                            isRunning = true;
-                            break;
-                        }
-                    }
-                }
-
-                if (isRunning)
-                {
-                    labelMSIServiceStatus.Text = Properties.Strings.MSIServiceRunning;
-                    labelMSIServiceStatus.ForeColor = System.Drawing.Color.FromArgb(40, 160, 80);
-                }
-                else
-                {
-                    labelMSIServiceStatus.Text = Properties.Strings.MSIServiceNotRunning;
-                    labelMSIServiceStatus.ForeColor = SystemColors.ControlDark;
-                }
+                bool isRunning = CheckMSIServiceRunning();
+                UpdateMSIServiceStatusUI(isRunning);
             }
             catch (Exception ex)
             {
                 Logger.WriteLine($"更新 MSI 服务状态失败: {ex.Message}");
                 labelMSIServiceStatus.Text = Properties.Strings.MSIServiceUnknown;
+            }
+        }
+
+        private bool CheckMSIServiceRunning()
+        {
+            foreach (var process in PROCESSES)
+            {
+                if (IsProcessRunning(process.Value))
+                    return true;
+            }
+
+            foreach (var service in SERVICES)
+            {
+                if (MSIFlux.Common.Utils.ServiceExists(service.Value) && MSIFlux.Common.Utils.ServiceRunning(service.Value))
+                    return true;
+            }
+
+            return false;
+        }
+
+        private void UpdateMSIServiceStatusUI(bool isRunning)
+        {
+            if (isRunning)
+            {
+                labelMSIServiceStatus.Text = Properties.Strings.MSIServiceRunning;
+                labelMSIServiceStatus.ForeColor = System.Drawing.Color.FromArgb(40, 160, 80);
+            }
+            else
+            {
+                labelMSIServiceStatus.Text = Properties.Strings.MSIServiceNotRunning;
+                labelMSIServiceStatus.ForeColor = SystemColors.ControlDark;
             }
         }
 
@@ -224,6 +252,12 @@ namespace MSIFlux.GUI
             {
                 checkWinFnSwap.Enabled = false;
             }
+
+            try
+            {
+                checkAutoEcoOnBattery.Checked = MSIFlux.Common.Configs.CommonConfig.GetAutoEcoOnBattery();
+            }
+            catch { }
         }
 
         private void CheckWinFnSwap_CheckedChanged(object? sender, EventArgs e)
@@ -233,6 +267,11 @@ namespace MSIFlux.GUI
                 _config.KeySwapConf.Enabled = checkWinFnSwap.Checked;
                 SaveConfig();
             }
+        }
+
+        private void CheckAutoEcoOnBattery_CheckedChanged(object? sender, EventArgs e)
+        {
+            MSIFlux.Common.Configs.CommonConfig.SetAutoEcoOnBattery(checkAutoEcoOnBattery.Checked);
         }
 
         private void SaveConfig()
@@ -569,28 +608,32 @@ namespace MSIFlux.GUI
         {
             try
             {
-                // 新架构下: "风扇控制" 状态 = Windows 服务 MSIFluxService 的状态.
-                // FanRunner 只是 GUI 侧的 IPC 代理, 是否 "在工作" 取决于服务是否在跑.
-                if (ServiceManager.IsRunning())
-                {
-                    labelServiceStatus.Text = Properties.Strings.FanControlRunning;
-                    labelServiceStatus.ForeColor = System.Drawing.Color.FromArgb(40, 160, 80);
-                    buttonStopFanControl.Enabled = true;
-                    buttonStartFanControl.Enabled = false;
-                }
-                else
-                {
-                    labelServiceStatus.Text = Properties.Strings.FanControlNotRunning;
-                    labelServiceStatus.ForeColor = System.Drawing.Color.FromArgb(220, 60, 60);
-                    buttonStopFanControl.Enabled = false;
-                    buttonStartFanControl.Enabled = true;
-                }
+                bool running = ServiceManager.IsRunning();
+                UpdateFanControlStatusUI(running);
             }
             catch (Exception ex)
             {
                 Logger.WriteLine($"更新风扇控制状态失败: {ex.Message}");
                 labelServiceStatus.Text = Properties.Strings.FanControlStatusUnknown;
                 labelServiceStatus.ForeColor = System.Drawing.Color.Gray;
+            }
+        }
+
+        private void UpdateFanControlStatusUI(bool isRunning)
+        {
+            if (isRunning)
+            {
+                labelServiceStatus.Text = Properties.Strings.FanControlRunning;
+                labelServiceStatus.ForeColor = System.Drawing.Color.FromArgb(40, 160, 80);
+                buttonStopFanControl.Enabled = true;
+                buttonStartFanControl.Enabled = false;
+            }
+            else
+            {
+                labelServiceStatus.Text = Properties.Strings.FanControlNotRunning;
+                labelServiceStatus.ForeColor = System.Drawing.Color.FromArgb(220, 60, 60);
+                buttonStopFanControl.Enabled = false;
+                buttonStartFanControl.Enabled = true;
             }
         }
 
@@ -779,6 +822,100 @@ namespace MSIFlux.GUI
             {
                 Logger.WriteLine($"刷新设置窗体失败: {ex.Message}");
             }
+        }
+
+        #endregion
+
+        #region Config Import/Export
+
+        private void ButtonExportConfig_Click(object? sender, EventArgs e)
+        {
+            if (_config == null)
+            {
+                MSIFlux.Common.Utils.ShowWarning("没有可导出的配置。", "MSI Flux");
+                return;
+            }
+
+            using var dialog = new SaveFileDialog();
+            dialog.Filter = "XML files (*.xml)|*.xml|All files (*.*)|*.*";
+            dialog.FileName = $"MSIFlux-{_config.Model}-{DateTime.Now:yyyyMMdd}.xml";
+            dialog.Title = Properties.Strings.Export;
+
+            if (dialog.ShowDialog() == DialogResult.OK)
+            {
+                try
+                {
+                    _config.Save(dialog.FileName);
+                    MSIFlux.Common.Utils.ShowInfo("配置导出成功！", "MSI Flux");
+                }
+                catch (Exception ex)
+                {
+                    Logger.WriteLine($"配置导出失败: {ex.Message}");
+                    MSIFlux.Common.Utils.ShowError($"配置导出失败: {ex.Message}");
+                }
+            }
+        }
+
+        private void ButtonImportConfig_Click(object? sender, EventArgs e)
+        {
+            using var dialog = new OpenFileDialog();
+            dialog.Filter = "XML files (*.xml)|*.xml|All files (*.*)|*.*";
+            dialog.Title = Properties.Strings.Import;
+
+            if (dialog.ShowDialog() != DialogResult.OK) return;
+
+            try
+            {
+                var importedConfig = MSIFlux_Config.Load(dialog.FileName);
+
+                if (_config != null &&
+                    (!string.IsNullOrEmpty(_config.Manufacturer) || !string.IsNullOrEmpty(_config.Model)))
+                {
+                    if (!string.Equals(importedConfig.Manufacturer, _config.Manufacturer, StringComparison.OrdinalIgnoreCase) ||
+                        !string.Equals(importedConfig.Model, _config.Model, StringComparison.OrdinalIgnoreCase))
+                    {
+                        var result = MessageBox.Show(
+                            $"此配置是为 {importedConfig.Manufacturer} {importedConfig.Model} 创建的，" +
+                            $"你的机器是 {_config.Manufacturer} {_config.Model}。\n\n" +
+                            "强制使用不同机型的配置可能导致风扇控制异常。\n确定要继续导入吗？",
+                            "MSI Flux",
+                            MessageBoxButtons.YesNo,
+                            MessageBoxIcon.Warning);
+
+                        if (result != DialogResult.Yes) return;
+                    }
+                }
+
+                importedConfig.Save(MSIFlux.Common.Paths.CurrentConf);
+
+                Program.FanRunner?.LoadConfig();
+                _config = Program.FanRunner?.GetConfig();
+                Program.FanRunner?.ApplyConfig();
+
+                var mainForm = this.Owner as SettingsForm;
+                mainForm?.ReloadConfig();
+
+                MSIFlux.Common.Utils.ShowInfo("配置导入成功！", "MSI Flux");
+            }
+            catch (InvalidConfigException)
+            {
+                MSIFlux.Common.Utils.ShowError("导入的文件不是有效的 MSI Flux 配置文件。");
+            }
+            catch (Exception ex)
+            {
+                Logger.WriteLine($"配置导入失败: {ex.Message}");
+                MSIFlux.Common.Utils.ShowError($"配置导入失败: {ex.Message}");
+            }
+        }
+
+        #endregion
+
+        #region Power Plan
+
+        private void ButtonPowerPlan_Click(object? sender, EventArgs e)
+        {
+            using var form = new PowerPlanForm();
+            form.ShowDialog(this);
         }
 
         #endregion

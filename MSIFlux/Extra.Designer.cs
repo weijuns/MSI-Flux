@@ -1,4 +1,4 @@
-﻿﻿using System.Drawing;
+using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Linq;
 using System.Windows.Forms;
@@ -33,7 +33,7 @@ namespace MSIFlux.GUI
             this.AutoScaleDimensions = new SizeF(7F, 15F);
             this.AutoScaleMode = AutoScaleMode.Font;
             this.BackColor = Color.FromArgb(240, 240, 240);
-            this.ClientSize = new Size(380, 420);
+            this.ClientSize = new Size(380, 495);
             this.FormBorderStyle = FormBorderStyle.FixedDialog;
             this.MaximizeBox = false;
             this.MinimizeBox = false;
@@ -63,7 +63,7 @@ namespace MSIFlux.GUI
             // ===== 通用设置卡片 =====
             this.cardGeneral = new ModernCard();
             this.cardGeneral.Location = new Point(16, 52);
-            this.cardGeneral.Size = new Size(348, 88);
+            this.cardGeneral.Size = new Size(348, 110);
             this.Controls.Add(this.cardGeneral);
 
             this.labelGeneralTitle = new Label();
@@ -87,9 +87,21 @@ namespace MSIFlux.GUI
             this.checkWinFnSwap.UseVisualStyleBackColor = true;
             this.cardGeneral.Controls.Add(this.checkWinFnSwap);
 
+            // 拔电自动省电
+            this.checkAutoEcoOnBattery = new CheckBox();
+            this.checkAutoEcoOnBattery.AutoSize = true;
+            this.checkAutoEcoOnBattery.Font = new Font("Segoe UI", 9F);
+            this.checkAutoEcoOnBattery.ForeColor = Color.FromArgb(55, 65, 81);
+            this.checkAutoEcoOnBattery.Location = new Point(14, 52);
+            this.checkAutoEcoOnBattery.Size = new Size(320, 22);
+            this.checkAutoEcoOnBattery.TabIndex = 2;
+            this.checkAutoEcoOnBattery.Text = "拔电自动省电模式";
+            this.checkAutoEcoOnBattery.UseVisualStyleBackColor = true;
+            this.cardGeneral.Controls.Add(this.checkAutoEcoOnBattery);
+
             // 语言选择行（独立框）
             this.panelLangBox = new Panel();
-            this.panelLangBox.Location = new Point(14, 52);
+            this.panelLangBox.Location = new Point(14, 74);
             this.panelLangBox.Size = new Size(320, 32);
             this.panelLangBox.BackColor = Color.FromArgb(227, 227, 227);
             this.panelLangBox.Padding = new Padding(6, 4, 6, 0);
@@ -116,7 +128,7 @@ namespace MSIFlux.GUI
 
             // ===== MSI Service 管理卡片 =====
             this.cardMSI = new ModernCard();
-            this.cardMSI.Location = new Point(16, 148);
+            this.cardMSI.Location = new Point(16, 170);
             this.cardMSI.Size = new Size(348, 110);
             this.Controls.Add(this.cardMSI);
 
@@ -173,7 +185,7 @@ namespace MSIFlux.GUI
 
             // ===== Fan Control 管理卡片 =====
             this.cardService = new ModernCard();
-            this.cardService.Location = new Point(16, 268);
+            this.cardService.Location = new Point(16, 290);
             this.cardService.Size = new Size(348, 110);
             this.Controls.Add(this.cardService);
 
@@ -228,6 +240,64 @@ namespace MSIFlux.GUI
             this.buttonStopFanControl.Cursor = Cursors.Hand;
             this.tableButtonsFan.Controls.Add(this.buttonStopFanControl, 1, 0);
 
+            // ===== Config 管理卡片 =====
+            this.cardConfig = new ModernCard();
+            this.cardConfig.Location = new Point(16, 410);
+            this.cardConfig.Size = new Size(348, 68);
+            this.Controls.Add(this.cardConfig);
+
+            this.labelConfigTitle = new Label();
+            this.labelConfigTitle.AutoSize = false;
+            this.labelConfigTitle.Font = new Font("Segoe UI", 10F, FontStyle.Bold);
+            this.labelConfigTitle.ForeColor = Color.FromArgb(30, 41, 59);
+            this.labelConfigTitle.Location = new Point(14, 10);
+            this.labelConfigTitle.Size = new Size(320, 20);
+            this.labelConfigTitle.Text = Properties.Strings.Profile;
+            this.cardConfig.Controls.Add(this.labelConfigTitle);
+
+            this.tableButtonsConfig = new TableLayoutPanel();
+            this.tableButtonsConfig.Location = new Point(14, 32);
+            this.tableButtonsConfig.Size = new Size(320, 30);
+            this.tableButtonsConfig.ColumnCount = 3;
+            this.tableButtonsConfig.RowCount = 1;
+            this.tableButtonsConfig.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 33.3333F));
+            this.tableButtonsConfig.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 33.3333F));
+            this.tableButtonsConfig.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 33.3333F));
+            this.tableButtonsConfig.RowStyles.Add(new RowStyle(SizeType.Absolute, 30F));
+            this.tableButtonsConfig.Margin = new Padding(0);
+            this.tableButtonsConfig.Padding = new Padding(4, 0, 4, 0);
+            this.cardConfig.Controls.Add(this.tableButtonsConfig);
+
+            this.buttonExportConfig = new ModernButton(Color.FromArgb(59, 130, 246));
+            this.buttonExportConfig.Dock = DockStyle.Fill;
+            this.buttonExportConfig.Font = new Font("Segoe UI", 9F, FontStyle.Bold);
+            this.buttonExportConfig.Name = "buttonExportConfig";
+            this.buttonExportConfig.TabIndex = 7;
+            this.buttonExportConfig.Text = Properties.Strings.Export;
+            this.buttonExportConfig.UseVisualStyleBackColor = false;
+            this.buttonExportConfig.Cursor = Cursors.Hand;
+            this.tableButtonsConfig.Controls.Add(this.buttonExportConfig, 0, 0);
+
+            this.buttonImportConfig = new ModernButton(Color.FromArgb(139, 92, 246));
+            this.buttonImportConfig.Dock = DockStyle.Fill;
+            this.buttonImportConfig.Font = new Font("Segoe UI", 9F, FontStyle.Bold);
+            this.buttonImportConfig.Name = "buttonImportConfig";
+            this.buttonImportConfig.TabIndex = 8;
+            this.buttonImportConfig.Text = Properties.Strings.Import;
+            this.buttonImportConfig.UseVisualStyleBackColor = false;
+            this.buttonImportConfig.Cursor = Cursors.Hand;
+            this.tableButtonsConfig.Controls.Add(this.buttonImportConfig, 1, 0);
+
+            this.buttonPowerPlan = new ModernButton(Color.FromArgb(234, 179, 8));
+            this.buttonPowerPlan.Dock = DockStyle.Fill;
+            this.buttonPowerPlan.Font = new Font("Segoe UI", 9F, FontStyle.Bold);
+            this.buttonPowerPlan.Name = "buttonPowerPlan";
+            this.buttonPowerPlan.TabIndex = 9;
+            this.buttonPowerPlan.Text = "电源计划";
+            this.buttonPowerPlan.UseVisualStyleBackColor = false;
+            this.buttonPowerPlan.Cursor = Cursors.Hand;
+            this.tableButtonsConfig.Controls.Add(this.buttonPowerPlan, 2, 0);
+
             this.ResumeLayout(false);
         }
 
@@ -243,11 +313,13 @@ namespace MSIFlux.GUI
         private ModernCard cardGeneral;
         private ModernCard cardMSI;
         private ModernCard cardService;
+        private ModernCard cardConfig;
 
         // 标题标签
         private Label labelGeneralTitle;
         private Label labelMSITitle;
         private Label labelServiceTitle;
+        private Label labelConfigTitle;
 
         // 状态标签
         private Label labelMSIServiceStatus;
@@ -255,6 +327,7 @@ namespace MSIFlux.GUI
 
         // 复选框
         private CheckBox checkWinFnSwap;
+        private CheckBox checkAutoEcoOnBattery;
 
         // 语言选择
         private Panel panelLangBox;
@@ -266,10 +339,14 @@ namespace MSIFlux.GUI
         private ModernButton buttonStopMSIService;
         private ModernButton buttonStartFanControl;
         private ModernButton buttonStopFanControl;
+        private ModernButton buttonExportConfig;
+        private ModernButton buttonImportConfig;
+        private ModernButton buttonPowerPlan;
 
         // 按钮容器
         private TableLayoutPanel tableButtonsMSI;
         private TableLayoutPanel tableButtonsFan;
+        private TableLayoutPanel tableButtonsConfig;
 
 
         // ============================================================

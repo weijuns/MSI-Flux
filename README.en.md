@@ -15,6 +15,10 @@
 - **🌀 Fan Control** — Custom CPU/GPU fan speed curves, temperature threshold adjustment, Cooler Boost full-speed mode
 - **🚀 Performance Modes** — Eco / Silent / Balanced / Turbo four-tier performance mode switching
 - **🔋 Battery Charge Threshold** — 0-100% custom charge limit to preserve battery health
+- **📊 Battery Level Display** — Real-time battery percentage and charging status
+- **⚡ Auto Eco on Battery** — Automatically switch to Eco mode when unplugged, restore last AC mode when plugged back in
+- **🔌 Power Plan Linking** — Automatically switch Windows power plans when changing performance modes (user-configurable GUIDs)
+- **💾 Config Import/Export** — Export current config to file, import with automatic model mismatch validation
 - **📦 Single exe, out of the box** — Just double-click. Bundled minimal Feature Manager auto-extracts to `C:\ProgramData\MSI Flux\FeatureManager\`
 - **🪶 Ultra lightweight** — Runtime memory usage only ~10MB, compared to MSI Center's ~950MB
 - **🎨 Modern UI** — Clean interface design inspired by [G-Helper](https://github.com/seerge/g-helper)
@@ -31,7 +35,13 @@
 | Temperature Threshold Control | ✔ | ✔ |
 | Performance Modes | ✔ | ✔ |
 | Battery Charge Threshold | ✔ | ✔ |
+| Battery Level Display | ❌ | ✔ (SystemInformation.PowerStatus) |
+| Auto Eco on Battery | ❌ | ✔ (Auto-switch to Eco, restore last mode on AC) |
+| Power Plan Linking | ❌ | ✔ (GUI-based GUID config, auto-switch) |
+| Config Import/Export | ❌ | ✔ (with model mismatch validation) |
 | Win/Fn Key Swap | ✔ | ✔ |
+| System Tray | ❌ | ✔ |
+| Auto-start on Boot | ❌ | ✔ (Task Scheduler) |
 | UI Interface | WinForms traditional UI | Modern card-style UI (inspired by G-Helper) |
 | Target Framework | .NET Framework 4.8 | .NET 8.0-windows |
 

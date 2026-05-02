@@ -1,4 +1,4 @@
-﻿// This file is part of MSIFlux, based on YAMDCC.
+// This file is part of MSIFlux, based on YAMDCC.
 // Original Copyright © 2023-2025 Sparronator9999
 // Modifications Copyright © 2026 weijuns.
 //
@@ -89,6 +89,34 @@ public sealed class CommonConfig
     [XmlElement]
     public bool PreRelease { get; set; }
 
+    /// <summary>
+    /// <see langword="true"/> to automatically switch to Eco mode when
+    /// the laptop is unplugged (DC power), and restore the last AC
+    /// performance mode when plugged back in.
+    /// </summary>
+    [XmlElement]
+    public bool AutoEcoOnBattery { get; set; }
+
+    /// <summary>
+    /// The performance mode index that was active before switching to
+    /// Eco mode due to battery power. Used to restore the mode when
+    /// AC power returns.
+    /// </summary>
+    [XmlElement]
+    public int LastAcPerfMode { get; set; } = -1;
+
+    [XmlElement]
+    public string? PowerPlanGuidEco { get; set; }
+
+    [XmlElement]
+    public string? PowerPlanGuidSilent { get; set; }
+
+    [XmlElement]
+    public string? PowerPlanGuidBalanced { get; set; }
+
+    [XmlElement]
+    public string? PowerPlanGuidTurbo { get; set; }
+
     public static string GetLastConf()
     {
         return Load().LastConf;
@@ -159,6 +187,57 @@ public sealed class CommonConfig
         CommonConfig cfg = Load();
         cfg.PreRelease = val;
         cfg.Save();
+    }
+
+    public static bool GetAutoEcoOnBattery()
+    {
+        return Load().AutoEcoOnBattery;
+    }
+
+    public static void SetAutoEcoOnBattery(bool val)
+    {
+        CommonConfig cfg = Load();
+        cfg.AutoEcoOnBattery = val;
+        cfg.Save();
+    }
+
+    public static int GetLastAcPerfMode()
+    {
+        return Load().LastAcPerfMode;
+    }
+
+    public static void SetLastAcPerfMode(int val)
+    {
+        CommonConfig cfg = Load();
+        cfg.LastAcPerfMode = val;
+        cfg.Save();
+    }
+
+    public static string? GetPowerPlanGuid(int modeIndex)
+    {
+        var cfg = Load();
+        return modeIndex switch
+        {
+            0 => cfg.PowerPlanGuidEco,
+            1 => cfg.PowerPlanGuidSilent,
+            2 => cfg.PowerPlanGuidBalanced,
+            3 => cfg.PowerPlanGuidTurbo,
+            _ => null
+        };
+    }
+
+    public static void SetPowerPlanGuids(string? eco, string? silent, string? balanced, string? turbo)
+    {
+        var cfg = Load();
+        cfg.PowerPlanGuidEco = eco;
+        cfg.PowerPlanGuidSilent = silent;
+        cfg.PowerPlanGuidBalanced = balanced;
+        cfg.PowerPlanGuidTurbo = turbo;
+        cfg.Save();
+        lock (_instanceLock)
+        {
+            _instance = null;
+        }
     }
 
     /// <summary>

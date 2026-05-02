@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Runtime.InteropServices;
 
 namespace MSIFlux.GUI
@@ -80,6 +80,22 @@ namespace MSIFlux.GUI
                  boost);
 
             PowerSetActiveScheme(IntPtr.Zero, activeSchemeGuid);
+        }
+
+        public static bool SetPowerPlan(Guid planGuid)
+        {
+            var hr = PowerSetActiveScheme(IntPtr.Zero, planGuid);
+            return hr == 0;
+        }
+
+        public static bool SetPowerPlan(string? planGuid)
+        {
+            if (string.IsNullOrWhiteSpace(planGuid)) return false;
+            if (Guid.TryParse(planGuid, out Guid guid))
+            {
+                return SetPowerPlan(guid);
+            }
+            return false;
         }
     }
 }

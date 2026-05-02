@@ -37,6 +37,8 @@ namespace MSIFlux.GUI
         private int _cpuFanRpm = 0;
         private int _gpuFanRpm = 0;
 
+        private bool _switchingPerfModeForBattery = false;
+
         private static readonly System.Drawing.Color colorGpuEco = System.Drawing.Color.FromArgb(255, 6, 180, 138);      // green
         private static readonly System.Drawing.Color colorGpuStandard = System.Drawing.Color.FromArgb(255, 58, 174, 239);   // blue
         private static readonly System.Drawing.Color colorGpuUltimate = System.Drawing.Color.FromArgb(255, 255, 32, 32);    // red
@@ -197,9 +199,52 @@ namespace MSIFlux.GUI
         
         private void SystemEvents_PowerModeChanged(object sender, PowerModeChangedEventArgs e)
         {
-            if (e.Mode == PowerModes.StatusChange && _isAutoMode)
+            if (e.Mode == PowerModes.StatusChange)
             {
-                ApplyAutoScreenRefreshRate();
+                HandleAutoEcoOnBattery();
+                if (_isAutoMode)
+                {
+                    ApplyAutoScreenRefreshRate();
+                }
+            }
+        }
+
+        private void HandleAutoEcoOnBattery()
+        {
+            if (_config?.PerfModeConf == null) return;
+
+            bool autoEco = false;
+            try
+            {
+                autoEco = CommonConfig.GetAutoEcoOnBattery();
+            }
+            catch { }
+
+            if (!autoEco) return;
+
+            bool isOnBattery = SystemInformation.PowerStatus.PowerLineStatus == PowerLineStatus.Offline;
+
+            if (isOnBattery)
+            {
+                int currentMode = _config.PerfModeConf.ModeSel;
+                if (currentMode != 0)
+                {
+                    CommonConfig.SetLastAcPerfMode(currentMode);
+                    _switchingPerfModeForBattery = true;
+                    SetPerformanceMode(0);
+                    _switchingPerfModeForBattery = false;
+                }
+            }
+            else
+            {
+                int lastMode = CommonConfig.GetLastAcPerfMode();
+                if (lastMode > 0 && lastMode < _config.PerfModeConf.PerfModes.Count)
+                {
+                    _switchingPerfModeForBattery = true;
+                    SetPerformanceMode(lastMode);
+                    _switchingPerfModeForBattery = false;
+                    CommonConfig.SetLastAcPerfMode(-1);
+                }
             }
         }
         
@@ -420,6 +465,7 @@ namespace MSIFlux.GUI
                     
                     ApplyPerfModeFanConfig(modeIndex);
                     ApplyCPUBoostForPerfMode(modeIndex);
+                    ApplyPowerPlanForPerfMode(modeIndex);
                     
                     if (_isAutoMode)
                     {
@@ -453,6 +499,19 @@ namespace MSIFlux.GUI
                     fansForm.SetCPUBoost(boostValue);
                 }
             }
+        }
+
+        private void ApplyPowerPlanForPerfMode(int modeIndex)
+        {
+            try
+            {
+                string? guid = CommonConfig.GetPowerPlanGuid(modeIndex);
+                if (!string.IsNullOrWhiteSpace(guid))
+                {
+                    PowerNative.SetPowerPlan(guid);
+                }
+            }
+            catch { }
         }
 
         public void UpdatePerfModeCPUBoost(int modeIndex, int boostValue)
@@ -585,11 +644,13 @@ namespace MSIFlux.GUI
             else
             {
                 int extraFormLeft = this.Left - extraForm.Width;
-                int extraFormTop = this.Top;
+                int extraFormTop = this.Bottom - extraForm.Height;
                 
                 Screen screen = Screen.FromControl(this);
                 extraFormLeft = Math.Max(screen.Bounds.Left, extraFormLeft);
                 extraFormTop = Math.Max(screen.Bounds.Top, extraFormTop);
+                if (extraFormTop + extraForm.Height > screen.Bounds.Bottom)
+                    extraFormTop = screen.Bounds.Bottom - extraForm.Height;
                 
                 extraForm.Location = new Point(extraFormLeft, extraFormTop);
                 extraForm.Show();
@@ -813,6 +874,7 @@ namespace MSIFlux.GUI
         private void TempRefreshTimer_Tick(object? sender, EventArgs e)
         {
             UpdateTempDisplay();
+            UpdateBatteryDisplay();
             UpdateOfflineBanner();
         }
 
@@ -951,6 +1013,29 @@ namespace MSIFlux.GUI
             
             labelCPUFan.Text = "CPU" + cpuText;
             labelGPUFan.Text = "GPU" + gpuText;
+        }
+
+        private void UpdateBatteryDisplay()
+        {
+            var battery = SystemInformation.PowerStatus;
+
+            if (battery.BatteryChargeStatus == BatteryChargeStatus.NoSystemBattery)
+            {
+                labelBattery.Text = "";
+                return;
+            }
+
+            float percent = battery.BatteryLifePercent;
+            if (percent < 0)
+            {
+                labelBattery.Text = "";
+                return;
+            }
+
+            int pct = (int)(percent * 100);
+            bool isCharging = battery.PowerLineStatus == PowerLineStatus.Online;
+            string status = isCharging ? $"  {Strings.Charging}" : "";
+            labelBattery.Text = $"{pct}%{status}";
         }
 
         public void ReloadConfig()
