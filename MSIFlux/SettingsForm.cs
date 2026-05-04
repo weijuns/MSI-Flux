@@ -308,7 +308,7 @@ namespace MSIFlux.GUI
             trayContextMenu.Items.Add(exitMenuItem);
             
             notifyIcon.ContextMenuStrip = trayContextMenu;
-            notifyIcon.DoubleClick += NotifyIcon_DoubleClick;
+            notifyIcon.MouseClick += NotifyIcon_MouseClick;
         }
 
         private string? _laptopScreen;
@@ -356,11 +356,11 @@ namespace MSIFlux.GUI
         private void ButtonBalanced_Click(object? sender, EventArgs e) => SetPerformanceMode(2);
         private void ButtonTurbo_Click(object? sender, EventArgs e) => SetPerformanceMode(3);
 
-        private void ButtonGpuEco_Click(object? sender, EventArgs e) => SetGpuMode(2);
-        private void ButtonGpuStandard_Click(object? sender, EventArgs e) => SetGpuMode(0);
-        private void ButtonGpuUltimate_Click(object? sender, EventArgs e) => SetGpuMode(1);
+        private async void ButtonGpuEco_Click(object? sender, EventArgs e) => await SetGpuModeAsync(2);
+        private async void ButtonGpuStandard_Click(object? sender, EventArgs e) => await SetGpuModeAsync(0);
+        private async void ButtonGpuUltimate_Click(object? sender, EventArgs e) => await SetGpuModeAsync(1);
 
-        private void SetGpuMode(int mode)
+        private async Task SetGpuModeAsync(int mode)
         {
             string modeName = mode switch
             {
@@ -369,45 +369,74 @@ namespace MSIFlux.GUI
                 _ => Strings.GPUModeStandard
             };
 
-            // Feature Manager Service.exe 是 WPF 应用, 需要在用户会话 (有桌面) 中启动.
-            // 服务端 (SYSTEM, Session 0) 无法直接启动 WPF 进程 (会崩溃).
-            // 所以由 GUI 侧负责启动 FM Service, 服务端只负责 MSI Foundation Service.
-            EnsureFeatureManagerServiceRunning();
+            buttonEco.Enabled = false;
+            buttonStandard.Enabled = false;
+            buttonUltimate.Enabled = false;
 
-            bool ok = Program.FanRunner?.SetGpuMode(mode) ?? false;
-            if (ok)
+            try
             {
-                VisualiseGpuMode(mode);
+                EnsureFeatureManagerServiceRunning();
 
-                var rebootResult = MessageBox.Show(
-                    $"{modeName} 切换命令执行成功。\n\n" +
-                    "⚠️ BIOS 需要冷启动 (关机+开机) 才能应用 GPU MUX 切换，热重启无效。\n\n" +
-                    "是否立即关机？ (关机后请手动开机)",
-                    Strings.GPUMode,
-                    MessageBoxButtons.YesNo,
-                    MessageBoxIcon.Warning,
-                    MessageBoxDefaultButton.Button1);
+                bool ok = await Task.Run(() => Program.FanRunner?.SetGpuMode(mode) ?? false);
 
-                if (rebootResult == DialogResult.Yes)
+                if (ok)
                 {
-                    try
+                    VisualiseGpuMode(mode);
+
+                    var rebootResult = MessageBox.Show(
+                        $"{modeName} 切换命令执行成功。\n\n" +
+                        "⚠️ BIOS 需要冷启动 (关机+开机) 才能应用 GPU MUX 切换，热重启无效。\n\n" +
+                        "是否立即关机？ (关机后请手动开机)",
+                        Strings.GPUMode,
+                        MessageBoxButtons.YesNo,
+                        MessageBoxIcon.Warning,
+                        MessageBoxDefaultButton.Button1);
+
+                    if (rebootResult == DialogResult.Yes)
                     {
-                        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("shutdown", "-f -s -t 0")
+                        try
                         {
-                            CreateNoWindow = true,
-                            UseShellExecute = false
-                        });
+                            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("shutdown", "-f -s -t 0")
+                            {
+                                CreateNoWindow = true,
+                                UseShellExecute = false
+                            });
+                        }
+                        catch { }
                     }
-                    catch { }
+                }
+                else
+                {
+                    string msiApSvcPath = System.IO.Path.Combine(
+                        System.IO.Path.Combine(
+                            Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+                            "MSI Flux", "FeatureManager"),
+                        "MSIAPService.exe");
+                    bool hasMsiApSvc = System.IO.File.Exists(msiApSvcPath);
+                    string details = hasMsiApSvc
+                        ? "MSI Foundation Service 启动失败。可能原因：服务二进制路径已失效，请重试（会自动修复）。"
+                        : "未找到 MSIAPService.exe。请先安装 Feature Manager。";
+
+                    MessageBox.Show(
+                        $"显卡模式切换失败：{modeName}\n\n{details}",
+                        Strings.GPUMode,
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Error);
                 }
             }
-            else
+            catch (Exception ex)
             {
                 MessageBox.Show(
-                    "显卡模式切换失败：MSI Foundation Service 或 Feature Manager Service 可能未正常启动。",
+                    $"显卡模式切换异常：{ex.Message}",
                     Strings.GPUMode,
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Error);
+            }
+            finally
+            {
+                buttonEco.Enabled = true;
+                buttonStandard.Enabled = true;
+                buttonUltimate.Enabled = true;
             }
         }
 
@@ -473,7 +502,6 @@ namespace MSIFlux.GUI
                     }
                     
                     SaveConfig();
-                    ApplyConfig();
                     
                     if (fansForm != null && fansForm.Visible)
                     {
@@ -736,9 +764,12 @@ namespace MSIFlux.GUI
             Environment.Exit(0);
         }
         
-        private void NotifyIcon_DoubleClick(object sender, EventArgs e)
+        private void NotifyIcon_MouseClick(object sender, MouseEventArgs e)
         {
-            // 双击托盘: 可见则隐藏, 否则稳健地唤起主窗口
+            // 单击托盘: 仅响应左键, 右键由 ContextMenuStrip 处理
+            if (e.Button != MouseButtons.Left) return;
+
+            // 可见则隐藏, 否则稳健地唤起主窗口
             if (this.Visible && this.WindowState != FormWindowState.Minimized)
             {
                 this.Hide();
@@ -933,6 +964,14 @@ namespace MSIFlux.GUI
 
             if (_offlineBanner.Visible != shouldShow)
             {
+                if (shouldShow)
+                {
+                    try
+                    {
+                        notifyIcon.ShowBalloonTip(3000, "MSI Flux", "后台服务连接已断开，性能模式切换等功能暂时不可用。点击\"立即修复\"恢复。", ToolTipIcon.Warning);
+                    }
+                    catch { }
+                }
                 _offlineBanner.Visible = shouldShow;
             }
         }
@@ -1046,13 +1085,24 @@ namespace MSIFlux.GUI
             InitUIFromConfig();
         }
 
-        private void SaveConfig()
+        private async void SaveConfig()
         {
             if (_config == null) return;
             try
             {
                 Program.FanRunner?.SaveConfig();
-                Program.FanRunner?.ApplyConfig();
+                var runner = Program.FanRunner;
+                if (runner != null)
+                {
+                    await Task.Run(() =>
+                    {
+                        bool ok = runner.ApplyConfig();
+                        if (!ok)
+                        {
+                            Logger.WriteLine("ApplyConfig failed (IPC disconnected?)");
+                        }
+                    });
+                }
             }
             catch (Exception ex)
             {

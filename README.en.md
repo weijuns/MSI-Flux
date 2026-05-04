@@ -78,14 +78,16 @@ Step 0.   Disable Micro Star SCM service (conflict avoidance); set MSI Foundatio
 Step 0.5  WMI ACPI bootstrap: copy msiapcfg.dll + set MofImagePath (first time only, auto-skipped after)
 Step 1.   Start MSI Foundation Service (MSIAPService.exe) on demand
 Step 2.   Write registry: FW_GPU_CH=target, FW_CurrentNewGPU=cur (must differ to trigger switch)
-Step 3.   Get_AP(0x00) → Read current ACPI state
-Step 4.   Set_Data(0xD1, mod) → Write GPU mode persistent bit (mod = byte[1] & ~0x03 | 0x01)
-Step 5.   Wait 2 seconds → BIOS processing
-Step 6.   Get_AP(0x00) → Re-read, check byte[2] bit1 == 1 (BIOS acknowledgment)
-Step 7.   Set_Data(0xBE, 0x02) → Send confirmation command, complete EC-level switch
-Step 8.   Write UEFI variable MsiDCVarData byte[5] → True commit point read by BIOS POST
+Step 3.   Write UEFI variable MsiDCVarData byte[5] → True commit point read by BIOS POST (written early so BIOS sees it when processing EC commands)
+Step 4.   Get_AP(0x00) → Read current ACPI state
+Step 5.   Set_Data(0xD1, mod) → Write GPU mode persistent bit (mod = byte[1] & ~0x03 | 0x01)
+Step 6.   Wait 3 seconds → BIOS processing (3s on first attempt, 2s on retries)
+Step 7.   Get_AP(0x00) → Re-read, check byte[2] bit1 == 1 (BIOS acknowledgment)
+Step 8.   Set_Data(0xBE, 0x02) → Send confirmation command, complete EC-level switch (always sent, never skipped)
 Step 9.   Cleanup: Kill FM Service process + Stop MSIAPService (prevent 0xe0434352 shutdown crash)
 ```
+
+> **Retry mechanism**: EC write sequence (Step 4-8) retries up to 3 times. Some transitions (e.g. Discrete→Hybrid) require the BIOS to receive the command multiple times before acknowledging.
 
 > **Cold boot required**: After switching, you must **shutdown then power on** (S5→S0). Warm reboot (S4→S0) will NOT work.
 > This is because the EC stays powered during reboot and BIOS skips MUX reconfiguration.

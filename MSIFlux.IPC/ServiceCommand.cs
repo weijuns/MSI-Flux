@@ -218,6 +218,18 @@ public enum Command
     /// </para>
     /// </remarks>
     GetGpuMode,
+    /// <summary>
+    /// Reports the current GPU mode from the GUI (which runs in the user session
+    /// and can reliably detect the display adapter via EnumDisplayDevices).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This command expects the following argument as
+    /// an <see langword="int"/>:<br/>
+    /// • Mode: 0=Hybrid, 1=Discrete, 2=Eco.
+    /// </para>
+    /// </remarks>
+    ReportGpuMode,
 }
 
 /// <summary>

@@ -117,7 +117,10 @@ internal static class UefiVariable
 
         log?.Info($"UEFI MsiDCVarData read: size={size}, attrs=0x{attrs:X}");
         byte before = data[5];
-        byte cleared = (byte)(before & 0xFC);
+        // Clear bits 0-3 (requested mode in 0-1, actual mode in 2-3).
+        // Clearing bits 2-3 ensures the value always differs from before,
+        // so the BIOS will re-process the MUX request on POST.
+        byte cleared = (byte)(before & 0xF0);
         byte after = mode switch
         {
             1 => (byte)(cleared | 0x01),  // Discrete
@@ -125,11 +128,6 @@ internal static class UefiVariable
             _ => cleared,                  // Hybrid (0)
         };
         log?.Info($"UEFI MsiDCVarData[5]: 0x{before:X2} -> 0x{after:X2} (mode={mode})");
-        if (after == before)
-        {
-            log?.Info("UEFI byte[5] unchanged, skip write.");
-            return true;
-        }
         data[5] = after;
         bool ok = WriteMsiDCVarData(data, size, attrs, log);
         if (ok) log?.Info("UEFI MsiDCVarData written successfully.");

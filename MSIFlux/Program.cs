@@ -858,8 +858,73 @@ namespace MSIFlux.GUI
         /// <summary>Sets GPU MUX mode (0=Hybrid, 1=Discrete). Requires reboot.</summary>
         public bool SetGpuMode(int mode) => _ipc.SetGpuMode(mode);
 
-        /// <summary>Gets current GPU MUX mode. 0=Hybrid, 1=Discrete, -1=error.</summary>
-        public int GetGpuMode() => _ipc.GetGpuMode();
+        /// <summary>Gets current GPU MUX mode. 0=Hybrid, 1=Discrete, 2=Eco, -1=error.</summary>
+        public int GetGpuMode()
+        {
+            // Detect locally using EnumDisplayDevices (works in user session).
+            int mode = DetectGpuModeLocal();
+            if (mode >= 0)
+            {
+                // Report to service for caching.
+                _ipc.ReportGpuMode(mode);
+                return mode;
+            }
+            // Fallback to service-side detection.
+            return _ipc.GetGpuMode();
+        }
+
+        /// <summary>
+        /// Detects GPU mode by checking which GPU drives the display via EnumDisplayDevices.
+        /// Must be called from the user session (not Session 0).
+        /// </summary>
+        private static int DetectGpuModeLocal()
+        {
+            try
+            {
+                bool nvidiaDriving = false;
+                bool intelDriving = false;
+
+                for (uint i = 0; ; i++)
+                {
+                    var adapter = new NativeInterop.DISPLAY_DEVICE
+                    {
+                        cb = System.Runtime.InteropServices.Marshal.SizeOf<NativeInterop.DISPLAY_DEVICE>()
+                    };
+                    if (!NativeInterop.EnumDisplayDevices(null, i, ref adapter, 0x00000001))
+                        break;
+
+                    if ((adapter.StateFlags & 0x00000001) == 0) // DISPLAY_DEVICE_ATTACHED_TO_DESKTOP
+                        continue;
+
+                    if (adapter.DeviceString.Contains("NVIDIA", StringComparison.OrdinalIgnoreCase))
+                        nvidiaDriving = true;
+                    else if (adapter.DeviceString.Contains("Intel", StringComparison.OrdinalIgnoreCase))
+                        intelDriving = true;
+                }
+
+                if (nvidiaDriving) return 1; // Discrete
+                if (intelDriving)
+                {
+                    // Intel drives display — check if NVIDIA is active for Hybrid vs Eco.
+                    try
+                    {
+                        using var s = new System.Management.ManagementObjectSearcher(
+                            "root\\cimv2",
+                            "SELECT Status FROM Win32_VideoController WHERE Name LIKE '%NVIDIA%'");
+                        foreach (System.Management.ManagementObject mo in s.Get())
+                        {
+                            var status = mo["Status"]?.ToString();
+                            if (status?.Equals("OK", StringComparison.OrdinalIgnoreCase) == true)
+                                return 0; // Hybrid
+                        }
+                    }
+                    catch { }
+                    return 2; // Eco
+                }
+            }
+            catch { }
+            return -1;
+        }
 
         public MSIFlux_Config? GetConfig() => _config;
 

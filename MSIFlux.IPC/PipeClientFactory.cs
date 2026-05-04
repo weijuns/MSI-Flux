@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.IO;
 using System.IO.Pipes;
 using System.Runtime.InteropServices;
@@ -19,8 +19,12 @@ internal static class PipeClientFactory
     internal static NamedPipeClientStream CreateAndConnectPipe(string pipeName, int timeout = 10)
     {
         string normalizedPath = Path.GetFullPath($"\\\\.\\pipe\\{pipeName}");
+        int waitCount = 0;
+        const int maxWaitCount = 500;
         while (!NamedPipeExists(normalizedPath))
         {
+            if (++waitCount > maxWaitCount)
+                throw new TimeoutException($"Named pipe '{pipeName}' not available after {maxWaitCount * timeout}ms");
             Thread.Sleep(timeout);
         }
         NamedPipeClientStream pipe = new(".", pipeName, PipeDirection.InOut, PipeOptions.Asynchronous | PipeOptions.WriteThrough);
@@ -32,7 +36,7 @@ internal static class PipeClientFactory
     {
         try
         {
-            bool exists = WaitNamedPipe(pipeName, -1);
+            bool exists = WaitNamedPipe(pipeName, 100);
             if (!exists)
             {
                 int error = Marshal.GetLastWin32Error();

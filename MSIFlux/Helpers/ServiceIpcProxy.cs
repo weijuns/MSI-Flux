@@ -1,4 +1,4 @@
-﻿// This file is part of MSIFlux, based on YAMDCC.
+// This file is part of MSIFlux, based on YAMDCC.
 // Licensed under GPL-3.0-or-later.
 //
 // ServiceIpcProxy: GUI 侧的命名管道客户端封装. 把 "IPC 消息异步往返" 转换成
@@ -110,7 +110,7 @@ internal sealed class ServiceIpcProxy : IDisposable
         => SendAndWaitForAck(Command.SetWinFnSwap, timeout, enable);
 
     public bool SetGpuMode(int mode, TimeSpan? timeout = null)
-        => SendAndWaitForAck(Command.SetGpuMode, timeout ?? TimeSpan.FromSeconds(15), mode);
+        => SendAndWaitForAck(Command.SetGpuMode, timeout ?? TimeSpan.FromSeconds(60), mode);
 
     /// <summary>Gets the current GPU MUX mode. Returns 0=Hybrid, 1=Discrete, -1=error.</summary>
     public int GetGpuMode(TimeSpan? timeout = null)
@@ -119,6 +119,10 @@ internal sealed class ServiceIpcProxy : IDisposable
         if (resp == null || resp.Value == null || resp.Value.Length < 1) return -1;
         return UnboxInt(resp.Value[0]);
     }
+
+    /// <summary>Reports the detected GPU mode to the service for caching.</summary>
+    public bool ReportGpuMode(int mode, TimeSpan? timeout = null)
+        => SendAndWaitForAck(Command.ReportGpuMode, timeout, mode);
 
     /// <summary>读取指定风扇对应传感器的温度 (°C). 失败返回 -1.</summary>
     public int GetTemp(int fanIndex, TimeSpan? timeout = null)

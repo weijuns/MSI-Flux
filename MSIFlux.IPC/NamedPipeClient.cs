@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.IO.Pipes;
 using System.Threading;
 using MSIFlux.IPC.IO;
@@ -87,6 +87,8 @@ public class NamedPipeClient<TRead, TWrite> : IDisposable
     private readonly AutoResetEvent _disconnected = new(false);
 
     private volatile bool _closedExplicitly;
+    private volatile bool _reconnecting;
+    private int _reconnectDelay = 1000;
 
     private bool _disposed;
 
@@ -104,6 +106,8 @@ public class NamedPipeClient<TRead, TWrite> : IDisposable
         AutoReconnect = true;
     }
 
+    private const int MaxReconnectDelay = 10000;
+
     /// <summary>
     /// Connects to the named pipe server asynchronously.
     /// </summary>
@@ -115,9 +119,27 @@ public class NamedPipeClient<TRead, TWrite> : IDisposable
     public void Start()
     {
         _closedExplicitly = false;
+        _reconnectDelay = 1000;
         Worker worker = new();
         worker.Error += WorkerOnError;
         worker.DoWork(ListenSync);
+    }
+
+    private void ScheduleReconnect()
+    {
+        if (_closedExplicitly || _reconnecting) return;
+        _reconnecting = true;
+
+        ThreadPool.QueueUserWorkItem(_ =>
+        {
+            Thread.Sleep(_reconnectDelay);
+            _reconnectDelay = Math.Min(_reconnectDelay * 2, MaxReconnectDelay);
+            _reconnecting = false;
+            if (!_closedExplicitly && !_disposed)
+            {
+                Start();
+            }
+        });
     }
 
     /// <summary>
@@ -275,11 +297,9 @@ public class NamedPipeClient<TRead, TWrite> : IDisposable
 
         _disconnected.Set();
 
-        // Reconnect
-        if (AutoReconnect && !_closedExplicitly)
+        if (AutoReconnect)
         {
-            Thread.Sleep(AutoReconnectDelay);
-            Start();
+            ScheduleReconnect();
         }
     }
 
@@ -303,6 +323,11 @@ public class NamedPipeClient<TRead, TWrite> : IDisposable
     private void WorkerOnError(object sender, WorkerErrorEventArgs e)
     {
         Error?.Invoke(sender, new PipeErrorEventArgs<TRead, TWrite>(Connection, e.Exception));
+
+        if (AutoReconnect)
+        {
+            ScheduleReconnect();
+        }
     }
     #endregion
 

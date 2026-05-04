@@ -445,10 +445,22 @@ internal sealed class FanControlService : ServiceBase
                 parseSuccess = true;
                 sendSuccessMsg = false;
                 int mode = GetGpuMode();
+                Log.Debug($"IPC GetGpuMode result: {mode}");
                 if (mode >= 0)
                 {
                     IPCServer.PushMessage(new ServiceResponse(
                         Response.GpuModeResult, mode), id);
+                    cmdSuccess = true;
+                }
+                break;
+            }
+
+            case Command.ReportGpuMode:
+            {
+                if (args.Length == 1 && args[0] is int gpuMode && gpuMode is >= 0 and <= 2)
+                {
+                    parseSuccess = true;
+                    SetCachedGpuMode(gpuMode);
                     cmdSuccess = true;
                 }
                 break;
@@ -1078,14 +1090,97 @@ internal sealed class FanControlService : ServiceBase
     private const string WmiScope = @"root\wmi";
     private const string AcpiClass = "MSI_ACPI";
 
+    // P/Invoke for EnumDisplayDevices — used to detect which GPU drives the display.
+    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential, CharSet = System.Runtime.InteropServices.CharSet.Ansi)]
+    private struct DISPLAY_DEVICE
+    {
+        public int cb;
+        [System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.ByValTStr, SizeConst = 32)]
+        public string DeviceName;
+        [System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.ByValTStr, SizeConst = 128)]
+        public string DeviceString;
+        public uint StateFlags;
+        [System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.ByValTStr, SizeConst = 128)]
+        public string DeviceID;
+        [System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.ByValTStr, SizeConst = 128)]
+        public string DeviceKey;
+    }
+
+    [System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Ansi)]
+    private static extern bool EnumDisplayDevices(string? lpDevice, uint iDevNum, ref DISPLAY_DEVICE lpDisplayDevice, uint dwFlags);
+
+    private const uint EDD_GET_DEVICE_INTERFACE_NAME = 0x00000001;
+    private const uint DISPLAY_DEVICE_ATTACHED_TO_DESKTOP = 0x00000001;
+
     /// <summary>
     /// Gets the current GPU MUX mode.
     /// 0=Hybrid, 1=Discrete, 2=Eco/iGPU, -1=error.
-    /// Uses FW_GPU_CH (target mode = actual mode after reboot).
-    /// Note: FW_CurrentNewGPU is unreliable — it's set to the OPPOSITE of the
-    /// target during switch and is NOT updated after reboot.
+    /// Primary: registry FW_GPU_CH (simple, reliable, reflects BIOS POST mode).
+    /// Fallback: WMI ACPI Get_AP + GPU enumeration (only when registry is unavailable).
     /// </summary>
+    // Cached GPU mode reported by GUI (runs in user session, can use EnumDisplayDevices).
+    // -1 = not yet reported.
+    private volatile int _gpuModeFromGui = -1;
+
+    /// <summary>Sets the GPU mode as detected by the GUI. Called via IPC.</summary>
+    internal void SetCachedGpuMode(int mode)
+    {
+        if (mode is >= 0 and <= 2)
+        {
+            _gpuModeFromGui = mode;
+            Log.Debug($"GPU mode cached from GUI: {mode}");
+        }
+    }
+
     private int GetGpuMode()
+    {
+        // Primary: use the mode reported by the GUI (runs in user session,
+        // uses EnumDisplayDevices to check which GPU drives the display).
+        if (_gpuModeFromGui >= 0)
+        {
+            string modeName = _gpuModeFromGui switch { 1 => "Discrete", 2 => "Eco", _ => "Hybrid" };
+            Log.Debug($"GPU mode from GUI cache: {modeName} ({_gpuModeFromGui})");
+            return _gpuModeFromGui;
+        }
+
+        // Fallback: registry FW_GPU_CH (may be stale after a failed switch,
+        // but better than nothing when GUI hasn't reported yet).
+        int regMode = ReadRegistryGpuMode();
+        Log.Debug($"GPU mode fallback to registry: {regMode}");
+        return regMode;
+    }
+
+    /// <summary>
+    /// Checks if the NVIDIA GPU is actively running (present and enabled).
+    /// In Hybrid mode, NVIDIA is active (Optimus rendering).
+    /// In Eco mode, NVIDIA is powered off.
+    /// </summary>
+    private bool IsNvidiaGpuActive()
+    {
+        try
+        {
+            using var s = new ManagementObjectSearcher(
+                "root\\cimv2",
+                "SELECT Status FROM Win32_VideoController WHERE Name LIKE '%NVIDIA%' OR Name LIKE '%GeForce%' OR Name LIKE '%RTX%' OR Name LIKE '%GTX%'");
+            foreach (ManagementObject mo in s.Get())
+            {
+                var status = mo["Status"]?.ToString();
+                if (!string.IsNullOrEmpty(status))
+                {
+                    Log.Debug($"NVIDIA GPU status: {status}");
+                    return status.Equals("OK", StringComparison.OrdinalIgnoreCase);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Debug($"NVIDIA GPU check failed: {ex.Message}");
+        }
+        return false;
+    }
+
+    /// <summary>Reads FW_GPU_CH from registry. Returns 0/1/2 or -1 if unavailable.</summary>
+    private int ReadRegistryGpuMode()
     {
         try
         {
@@ -1093,28 +1188,11 @@ internal sealed class FanControlService : ServiceBase
             if (k is not null)
             {
                 object? val = k.GetValue("FW_GPU_CH");
-                if (val is int mode)
-                {
-                    // FW_GPU_CH: 0=Hybrid, 1=Discrete, 2=Eco/iGPU
-                    // Other values (e.g. 5) may be set by MSI Center's Feature Manager
-                    return mode switch
-                    {
-                        0 => 0,
-                        1 => 1,
-                        2 => 2,
-                        _ => 0  // unknown -> default to Hybrid
-                    };
-                }
+                if (val is int m && m is >= 0 and <= 2)
+                    return m;
             }
         }
         catch { }
-
-        // Fallback: try WMI Get_AP
-        byte[]? ap0 = WmiCallGet("Get_AP", 0x00);
-        if (ap0 != null && ap0.Length > 1)
-        {
-            return (ap0[1] & 0x01) != 0 ? 1 : 0;
-        }
         return -1;
     }
 
@@ -1488,6 +1566,37 @@ internal sealed class FanControlService : ServiceBase
             }
             else
             {
+                // Check if the registered binary path is stale (points to a non-existent file)
+                try
+                {
+                    string keyPath = @"SYSTEM\CurrentControlSet\Services\MSI Foundation Service";
+                    using var regKey = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(keyPath);
+                    string? registeredBinPath = regKey?.GetValue("ImagePath") as string;
+                    if (!string.IsNullOrEmpty(registeredBinPath))
+                    {
+                        string cleanPath = registeredBinPath.Trim('"');
+                        if (!File.Exists(cleanPath) && File.Exists(msiApSvcPath))
+                        {
+                            Log.Warn($"MSI Foundation Service binary path is stale: {registeredBinPath}");
+                            Log.Info($"Re-registering with correct path: {msiApSvcPath}");
+                            try
+                            {
+                                var delP = Process.Start(new ProcessStartInfo("sc.exe")
+                                {
+                                    Arguments = "delete \"MSI Foundation Service\"",
+                                    UseShellExecute = false,
+                                    CreateNoWindow = true
+                                });
+                                delP!.WaitForExit(5000);
+                                Thread.Sleep(1000);
+                            }
+                            catch { }
+                            // Fall through to InstallUtil re-registration below
+                        }
+                    }
+                }
+                catch { }
+
                 // Try starting the Windows service first
                 try
                 {
@@ -1498,7 +1607,7 @@ internal sealed class FanControlService : ServiceBase
                 }
                 catch
                 {
-                    // Service not registered; try InstallUtil then start
+                    // Service not registered or stale; try InstallUtil then start
                     if (File.Exists(msiApSvcPath))
                     {
                         string installUtil = Path.Combine(
@@ -1708,70 +1817,9 @@ internal sealed class FanControlService : ServiceBase
             }
         }
 
-        byte[]? ap0 = WmiCallGet("Get_AP", 0x00);
-        if (ap0 is null || ap0.Length < 2 || ap0[0] != 0x01)
-        {
-            Log.Warn("WMI Get_AP not available after MOF registration attempt. Registry-only mode: reboot required.");
-            Log.Info($"GPU mode switch to {modeName} completed (registry-only). Reboot required.");
-            return true;
-        }
-        Log.Info($"Get_AP(0) byte[1]=0x{ap0[1]:X2}");
-
-        // Step 5: Modify byte[1]: clear bit0, clear bit1, then set bit0
-        byte orig = ap0[1];
-        byte mod = (byte)((orig & ~0x03) | 0x01);  // bit0=1, bit1=0
-        Log.Info($"Modified byte[1]: 0x{orig:X2} -> 0x{mod:X2}");
-
-        // Step 6: Call Set_Data(cmd=0xD1, byte[1]=mod)
-        var pkg1 = new byte[32];
-        pkg1[0] = 0xD1;
-        pkg1[1] = mod;
-        byte[]? r1 = WmiCallSet("Set_Data", pkg1);
-        if (r1 is null || r1.Length == 0 || r1[0] != 0x01)
-        {
-            Log.Error($"Set_Data(0xD1) failed, ACK=0x{(r1 is { Length: > 0 } ? r1[0] : 0):X2}");
-            return false;
-        }
-        Log.Info($"Set_Data(0xD1) ACK=0x{r1[0]:X2} (success)");
-
-        // Step 7: Wait 2s for BIOS to process
-        Thread.Sleep(2000);
-
-        // Step 8: Re-read Get_AP(0) to check BIOS response
-        byte[]? ap0_after = WmiCallGet("Get_AP", 0x00);
-        if (ap0_after is null || ap0_after.Length < 3)
-        {
-            Log.Error("Re-read Get_AP(0) failed");
-            return false;
-        }
-        byte checkByte = ap0_after[2];
-        Log.Info($"Re-read Get_AP(0) byte[2]=0x{checkByte:X2} (bit1={(checkByte >> 1) & 1})");
-
-        // Step 9: If bit1 is set, BIOS acknowledged; write Set_Data(0xBE, 0x02)
-        if (((checkByte >> 1) & 1) == 1)
-        {
-            var pkg2 = new byte[32];
-            pkg2[0] = 0xBE;
-            pkg2[1] = 0x02;
-            byte[]? r2 = WmiCallSet("Set_Data", pkg2);
-            if (r2 is not null && r2.Length > 0)
-            {
-                Log.Info($"Set_Data(0xBE) ACK=0x{r2[0]:X2}");
-            }
-            else
-            {
-                Log.Warn("Set_Data(0xBE) returned null/empty");
-            }
-        }
-        else
-        {
-            Log.Warn("BIOS did not acknowledge (bit1 not set), skipping Set_Data(0xBE)");
-        }
-
-        // Step 10: Commit UEFI variable MsiDCVarData (BIOS POST 真正读取的提交点).
-        // 这是 Feature Manager Service.WatcherACAIntelligentCH_EventArrived 监听 AC 事件时调用的
-        // Set_BIOS_Flag_Of_New_GPU_Switch 方法所做的事 — 写 UEFI 变量 byte[5] 的 bit0/bit1.
-        // 没有这一步, 即使 EC 写入成功, BIOS POST 也不会切换 GPU MUX.
+        // Step 4.5: Commit UEFI variable BEFORE the EC sequence.
+        // BIOS may check the UEFI variable when processing EC commands;
+        // writing it first (matching GPUSwitch tool order) ensures it's visible.
         try
         {
             bool uefiOk = UefiVariable.CommitGpuMode(mode, Log);
@@ -1782,6 +1830,90 @@ internal sealed class FanControlService : ServiceBase
         {
             Log.Warn($"UEFI commit threw: {ex.Message}");
         }
+
+        byte[]? ap0 = WmiCallGet("Get_AP", 0x00);
+        if (ap0 is null || ap0.Length < 2 || ap0[0] != 0x01)
+        {
+            Log.Warn("WMI Get_AP not available after MOF registration attempt. Registry-only mode: reboot required.");
+            Log.Info($"GPU mode switch to {modeName} completed (registry-only). Reboot required.");
+            return true;
+        }
+        Log.Info($"Get_AP(0) byte[1]=0x{ap0[1]:X2}");
+
+        // Step 5-9: EC write sequence with retry.
+        // Discrete→Hybrid needs the BIOS to see the EC command before it will acknowledge.
+        const int maxAttempts = 3;
+        bool ecSuccess = false;
+        for (int attempt = 1; attempt <= maxAttempts; attempt++)
+        {
+            // Read current AP state
+            byte[]? ap0_cur = WmiCallGet("Get_AP", 0x00);
+            if (ap0_cur is null || ap0_cur.Length < 2 || ap0_cur[0] != 0x01)
+            {
+                Log.Warn($"Attempt {attempt}: Get_AP(0) failed");
+                if (attempt < maxAttempts) { Thread.Sleep(1000); continue; }
+                break;
+            }
+
+            // Modify byte[1]: clear bit0, clear bit1, then set bit0
+            byte orig = ap0_cur[1];
+            byte mod = (byte)((orig & ~0x03) | 0x01);  // bit0=1, bit1=0
+            Log.Info($"Attempt {attempt}: Get_AP(0) byte[1]=0x{orig:X2} -> 0x{mod:X2}");
+
+            // Set_Data(0xD1)
+            var pkg1 = new byte[32];
+            pkg1[0] = 0xD1;
+            pkg1[1] = mod;
+            byte[]? r1 = WmiCallSet("Set_Data", pkg1);
+            if (r1 is null || r1.Length == 0 || r1[0] != 0x01)
+            {
+                Log.Error($"Attempt {attempt}: Set_Data(0xD1) failed, ACK=0x{(r1 is { Length: > 0 } ? r1[0] : 0):X2}");
+                if (attempt < maxAttempts) { Thread.Sleep(1000); continue; }
+                return false;
+            }
+            Log.Info($"Attempt {attempt}: Set_Data(0xD1) ACK=0x{r1[0]:X2}");
+
+            // Wait for BIOS to process (first attempt gets extra time)
+            int waitMs = attempt == 1 ? 3000 : 2000;
+            Thread.Sleep(waitMs);
+
+            // Re-read Get_AP(0) to check BIOS response
+            byte[]? ap0_after = WmiCallGet("Get_AP", 0x00);
+            byte checkByte = 0;
+            if (ap0_after is not null && ap0_after.Length >= 3)
+            {
+                checkByte = ap0_after[2];
+                Log.Info($"Attempt {attempt}: Re-read byte[2]=0x{checkByte:X2} (bit1={(checkByte >> 1) & 1})");
+            }
+            else
+            {
+                Log.Warn($"Attempt {attempt}: Re-read Get_AP(0) failed");
+            }
+
+            // Always send Set_Data(0xBE, 0x02) to confirm/commit the EC write.
+            {
+                var pkg2 = new byte[32];
+                pkg2[0] = 0xBE;
+                pkg2[1] = 0x02;
+                byte[]? r2 = WmiCallSet("Set_Data", pkg2);
+                if (r2 is not null && r2.Length > 0)
+                    Log.Info($"Attempt {attempt}: Set_Data(0xBE) ACK=0x{r2[0]:X2}");
+                else
+                    Log.Warn($"Attempt {attempt}: Set_Data(0xBE) returned null/empty");
+            }
+
+            if (((checkByte >> 1) & 1) == 1)
+            {
+                ecSuccess = true;
+                break;
+            }
+            Log.Warn($"Attempt {attempt}: BIOS did not acknowledge (bit1 not set)");
+
+            if (attempt < maxAttempts)
+                Thread.Sleep(1000);
+        }
+        if (!ecSuccess)
+            Log.Warn("BIOS did not acknowledge after all attempts, proceeding with UEFI commit anyway.");
 
         Log.Info($"GPU mode switch to {modeName} completed. *Cold boot* (shutdown + power on) required, NOT a warm reboot.");
 

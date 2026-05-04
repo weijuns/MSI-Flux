@@ -18,8 +18,9 @@
 2. 设置 MSI Foundation Service 为手动启动（不自启）
 3. 启动 MSI Foundation Service（如未运行则通过 InstallUtil 安装）
 4. 写注册表 `FW_GPU_CH` / `FW_CurrentNewGPU`
-5. WMI ACPI 调用序列: `Get_AP(0)` → `Set_Data(0xD1)` → 等待 2s → `Set_Data(0xBE)`
-6. 提示用户重启生效
+5. 写 UEFI 变量 `MsiDCVarData` byte[5]（提前到 EC 序列之前，匹配 GPUSwitch 工具顺序）
+6. WMI ACPI 调用序列（带重试，最多 3 次）: `Get_AP(0)` → `Set_Data(0xD1)` → 等待 3s → `Set_Data(0xBE)`
+7. 提示用户冷启动生效
 
 ### 2. Feature Manager 依赖处理
 
@@ -61,7 +62,31 @@
 
 所有资源通过 `EnsureFeatureManagerExtracted()` 提取到 `C:\ProgramData\MSI Flux\FeatureManager\`。
 
-### 5. README 更新
+### 5. GPU 模式检测 (GUI 侧)
+
+**问题**: Windows 服务运行在 Session 0，`EnumDisplayDevices` 无法检测显示适配器。
+
+**方案**: GUI 侧（用户会话）通过 `EnumDisplayDevices` 检测实际 GPU 模式，通过 IPC `ReportGpuMode` 命令报告给服务端缓存。
+
+**检测逻辑**:
+- NVIDIA 驱动桌面输出 → Discrete (1)
+- Intel 驱动桌面输出 + NVIDIA 状态 OK → Hybrid (0)
+- Intel 驱动桌面输出 + NVIDIA 不可用 → Eco (2)
+
+**关键文件**:
+- `MSIFlux/NativeInterop.cs` — EnumDisplayDevices P/Invoke
+- `MSIFlux/Program.cs` — DetectGpuModeLocal() + ReportGpuMode IPC
+- `MSIFlux.IPC/ServiceCommand.cs` — ReportGpuMode 命令
+- `MSIFlux/Helpers/ServiceIpcProxy.cs` — ReportGpuMode 代理方法
+- `MSIFlux.Service/FanControlService.cs` — SetCachedGpuMode + GetGpuMode 缓存逻辑
+
+### 6. UEFI 变量修复
+
+**问题**: `UefiVariable.CommitGpuMode()` 使用 `0xFC` 掩码只清除 bit 0-1，当 byte[5] 的 bit 2-3（BIOS 回写的实际模式）与目标不一致时，写入被跳过。
+
+**修复**: 掩码改为 `0xF0`，清除 bit 0-3（请求模式 + 实际模式），确保每次切换都写入 UEFI 变量。
+
+### 7. README 更新
 
 - 中英文 README 均已更新，说明 FM 依赖和安装步骤
 - 添加前置要求: Feature Manager (MSI Center 组件)
@@ -107,10 +132,15 @@
 | 文件 | 说明 |
 |---|---|
 | `MSIFlux.Service/FanControlService.cs` | GPU 切换核心逻辑 (`SetGpuMode`, `WmiCallGet`, `WmiCallSet`, `EnsureMsiRegistryKeys`) |
+| `MSIFlux.Service/UefiVariable.cs` | UEFI 变量读写 (`MsiDCVarData`, `CommitGpuMode`) |
+| `MSIFlux/NativeInterop.cs` | GUI 侧 `EnumDisplayDevices` P/Invoke 声明 |
+| `MSIFlux/Program.cs` | GUI 侧 GPU 模式本地检测 (`DetectGpuModeLocal`) + IPC 报告 |
 | `MSIFlux/MSIFlux.csproj` | 嵌入资源配置 |
 | `MSIFlux.Common/Paths.cs` | `EnsureFeatureManagerExtracted()` 资源提取 |
 | `MSIFlux.Common/Utils.cs` | `IsMSIServiceRunning()` 冲突检测（已排除 MSI Foundation Service） |
 | `MSIFlux/SettingsForm.cs` | GUI 端 GPU 切换按钮和 `EnsureFeatureManagerServiceRunning()` |
+| `MSIFlux/Helpers/ServiceIpcProxy.cs` | IPC 代理（含 `ReportGpuMode`） |
+| `MSIFlux.IPC/ServiceCommand.cs` | IPC 命令定义（含 `ReportGpuMode`） |
 | `FeatureManager/MSI_ACPI.mof` | 完整 WMI ACPI schema（15 个类） |
 | `FeatureManager/KernCoreLib64.Sys` | MSI 内核组件（作用不明） |
 | `Feature Manager_1.0.2312.2201.exe` | FM 安装包 |
