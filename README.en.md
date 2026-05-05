@@ -6,6 +6,7 @@
 > featuring **GPU triple-mode switching**, a modern UI, and bundled WMI ACPI bootstrap and minimal Feature Manager files.
 >
 > 🎯 **Single exe, no installation** — Just double-click to run. Runtime memory usage is only ~10MB, incredibly lightweight.
+> Built-in .NET runtime detection: if .NET 8 is not installed, a dialog guides the user to download it.
 
 ---
 
@@ -17,7 +18,7 @@
 - **🔋 Battery Charge Threshold** — 0-100% custom charge limit to preserve battery health
 - **📊 Battery Level Display** — Real-time battery percentage and charging status
 - **⚡ Auto Eco on Battery** — Automatically switch to Eco mode when unplugged, restore last AC mode when plugged back in
-- **🔌 Power Plan Linking** — Automatically switch Windows power plans when changing performance modes (user-configurable GUIDs)
+- **🔌 Power Plan Linking** — Automatically switch Windows power plans when changing performance modes (user-configurable GUIDs, falls back to Balanced if left empty)
 - **💾 Config Import/Export** — Export current config to file, import with automatic model mismatch validation
 - **📦 Single exe, out of the box** — Just double-click. Bundled minimal Feature Manager auto-extracts to `C:\ProgramData\MSI Flux\FeatureManager\`
 - **🪶 Ultra lightweight** — Runtime memory usage only ~10MB, compared to MSI Center's ~950MB
@@ -37,7 +38,7 @@
 | Battery Charge Threshold | ✔ | ✔ |
 | Battery Level Display | ❌ | ✔ (SystemInformation.PowerStatus) |
 | Auto Eco on Battery | ❌ | ✔ (Auto-switch to Eco, restore last mode on AC) |
-| Power Plan Linking | ❌ | ✔ (GUI-based GUID config, auto-switch) |
+| Power Plan Linking | ❌ | ✔ (GUI-based GUID config, fallback to Balanced, auto-switch) |
 | Config Import/Export | ❌ | ✔ (with model mismatch validation) |
 | Win/Fn Key Swap | ✔ | ✔ |
 | System Tray | ❌ | ✔ |
@@ -178,26 +179,24 @@ Write flow: `EC.WriteByte(Reg, Value)` → WinRing0 driver → EC hardware → B
 ### Prerequisites
 
 - Windows 10/11 (64-bit)
-- .NET 8.0 Runtime
+- [.NET 8.0 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/8.0) (Windows x64)
 - MSI laptop
 - First use requires one GPU switch (auto-completes WMI ACPI bootstrap), then a reboot to activate
 - Default config file: `MSI-10th-gen-or-newer-dualfan.xml` (for 10th-gen and newer dual-fan models)
 
+> Just double-click `MSI Flux.exe` to run. If .NET 8 is not installed, a dialog will guide you to the download page.
+
 ### Build
 
 ```powershell
-dotnet build YAMDCC.sln -c Release
+# Build framework-dependent
+dotnet publish MSIFlux/MSIFlux.csproj -c Release -r win-x64 --self-contained false -o publish
+
+# Build launcher with .NET runtime detection (embeds main exe, self-contained)
+dotnet publish Launcher/Launcher.csproj -c Release -o publish-launcher
 ```
 
-### Install Service
-
-```powershell
-# Run as Administrator
-sc.exe create yamdccsvc binPath= "<build output path>\yamdccsvc.exe" start= auto DisplayName= "YAMDCC Service"
-sc.exe start yamdccsvc
-```
-
-Then launch `MSI Flux.exe` to start using the application.
+Final artifact: `publish-launcher/MSI Flux.exe` (~21MB), double-click to run.
 
 ---
 

@@ -30,7 +30,7 @@ namespace MSIFlux.GUI
             this.AutoScaleDimensions = new SizeF(7F, 15F);
             this.AutoScaleMode = AutoScaleMode.Font;
             this.BackColor = Color.FromArgb(240, 240, 240);
-            this.ClientSize = new Size(420, 280);
+            this.ClientSize = new Size(420, 290);
             this.FormBorderStyle = FormBorderStyle.FixedDialog;
             this.MaximizeBox = false;
             this.MinimizeBox = false;
@@ -40,19 +40,20 @@ namespace MSIFlux.GUI
 
             var lblHint = new Label
             {
-                Text = "为每个性能模式指定 Windows 电源计划 GUID。\n留空则不切换。",
+                Text = "为每个性能模式指定 Windows 电源计划 GUID。\n" +
+                       "留空则自动使用「平衡模式」的电源计划；若平衡模式也留空，则不联动。",
                 Font = new Font("Segoe UI", 9F),
                 ForeColor = Color.FromArgb(100, 110, 130),
                 Location = new Point(16, 12),
-                Size = new Size(388, 36),
+                Size = new Size(388, 44),
                 AutoSize = false,
             };
             this.Controls.Add(lblHint);
 
-            int y = 54;
+            int y = 62;
             txtEco = CreateGuidRow("省电模式 (Eco)", y); y += 46;
             txtSilent = CreateGuidRow("安静模式 (Silent)", y); y += 46;
-            txtBalanced = CreateGuidRow("平衡模式 (Balanced)", y); y += 46;
+            txtBalanced = CreateGuidRow("平衡模式 (Balanced)", y, "留空则电源计划联动不生效"); y += 46;
             txtTurbo = CreateGuidRow("增强模式 (Turbo)", y); y += 20;
 
             int buttonWidth = 90;
@@ -113,7 +114,7 @@ namespace MSIFlux.GUI
             this.ResumeLayout(false);
         }
 
-        private TextBox CreateGuidRow(string label, int y)
+        private TextBox CreateGuidRow(string label, int y, string? placeholder = null)
         {
             var lbl = new Label
             {
@@ -131,7 +132,7 @@ namespace MSIFlux.GUI
                 Font = new Font("Consolas", 9F),
                 Location = new Point(168, y),
                 Size = new Size(236, 22),
-                PlaceholderText = "例如 a1841308-3541-4fab-bc81-f71556f20b4a",
+                PlaceholderText = placeholder ?? "留空则使用平衡模式",
             };
             this.Controls.Add(txt);
 

@@ -873,12 +873,27 @@ namespace MSIFlux.GUI
             return _ipc.GetGpuMode();
         }
 
+        private static int _cachedGpuMode = -1;
+        private static DateTime _gpuModeCacheTime = DateTime.MinValue;
+        private static readonly TimeSpan GpuModeCacheTtl = TimeSpan.FromSeconds(10);
+
+        /// <summary>Invalidates the GPU mode cache (call after a GPU switch).</summary>
+        public static void InvalidateGpuModeCache()
+        {
+            _cachedGpuMode = -1;
+            _gpuModeCacheTime = DateTime.MinValue;
+        }
+
         /// <summary>
         /// Detects GPU mode by checking which GPU drives the display via EnumDisplayDevices.
         /// Must be called from the user session (not Session 0).
+        /// Results are cached for 10 seconds.
         /// </summary>
         private static int DetectGpuModeLocal()
         {
+            if (_cachedGpuMode >= 0 && (DateTime.UtcNow - _gpuModeCacheTime) < GpuModeCacheTtl)
+                return _cachedGpuMode;
+
             try
             {
                 bool nvidiaDriving = false;
@@ -902,8 +917,9 @@ namespace MSIFlux.GUI
                         intelDriving = true;
                 }
 
-                if (nvidiaDriving) return 1; // Discrete
-                if (intelDriving)
+                int result = -1;
+                if (nvidiaDriving) result = 1; // Discrete
+                else if (intelDriving)
                 {
                     // Intel drives display — check if NVIDIA is active for Hybrid vs Eco.
                     try
@@ -915,12 +931,19 @@ namespace MSIFlux.GUI
                         {
                             var status = mo["Status"]?.ToString();
                             if (status?.Equals("OK", StringComparison.OrdinalIgnoreCase) == true)
-                                return 0; // Hybrid
+                            { result = 0; break; } // Hybrid
                         }
                     }
                     catch { }
-                    return 2; // Eco
+                    if (result < 0) result = 2; // Eco
                 }
+
+                if (result >= 0)
+                {
+                    _cachedGpuMode = result;
+                    _gpuModeCacheTime = DateTime.UtcNow;
+                }
+                return result;
             }
             catch { }
             return -1;

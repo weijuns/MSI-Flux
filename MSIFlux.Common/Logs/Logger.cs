@@ -81,6 +81,11 @@ public sealed class Logger : IDisposable
     public LogLevel FileLevel { get; set; } = LogLevel.Info;
 
     /// <summary>
+    /// Maximum log file size in bytes before automatic rotation (default 10MB).
+    /// </summary>
+    public long MaxLogFileSize { get; set; } = 10 * 1024 * 1024;
+
+    /// <summary>
     /// Should the log time be shown in console logs?
     /// </summary>
     public bool TimeToConsole { get; set; }
@@ -228,6 +233,17 @@ public sealed class Logger : IDisposable
 
         lock (LogWriter)
         {
+            // Rotate log if it exceeds the size limit
+            try
+            {
+                if (LogWriter.BaseStream is FileStream fs && fs.Length > MaxLogFileSize)
+                {
+                    LogWriter.Dispose();
+                    InitLogFile();
+                }
+            }
+            catch { }
+
             foreach (string str in msg.Split(NewLine, StringSplitOptions.RemoveEmptyEntries))
             {
                 LogWriter.WriteLine(LogString(str, level, TimeToFile));

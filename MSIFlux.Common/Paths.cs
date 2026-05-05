@@ -250,10 +250,15 @@ public static class Paths
                 string fileName = resName.Substring(prefix.Length);
                 string destPath = Path.Combine(fmDir, fileName);
 
-                if (File.Exists(destPath)) continue;  // 不覆盖已存在文件
-
                 using Stream? src = asm.GetManifestResourceStream(resName);
                 if (src is null) continue;
+
+                // Skip if file exists and size matches the embedded resource
+                if (File.Exists(destPath))
+                {
+                    long existingSize = new FileInfo(destPath).Length;
+                    if (existingSize == src.Length) continue;
+                }
 
                 using var dst = File.Create(destPath);
                 src.CopyTo(dst);

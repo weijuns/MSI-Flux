@@ -1112,6 +1112,46 @@ internal sealed class FanControlService : ServiceBase
     private const uint EDD_GET_DEVICE_INTERFACE_NAME = 0x00000001;
     private const uint DISPLAY_DEVICE_ATTACHED_TO_DESKTOP = 0x00000001;
 
+    // P/Invoke for service configuration (replaces sc.exe config calls).
+    [System.Runtime.InteropServices.DllImport("advapi32.dll", SetLastError = true, CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+    private static extern IntPtr OpenSCManagerW(string? lpMachineName, string? lpDatabaseName, uint dwDesiredAccess);
+
+    [System.Runtime.InteropServices.DllImport("advapi32.dll", SetLastError = true, CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+    private static extern IntPtr OpenServiceW(IntPtr hSCManager, string lpServiceName, uint dwDesiredAccess);
+
+    [System.Runtime.InteropServices.DllImport("advapi32.dll", SetLastError = true, CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+    private static extern bool ChangeServiceConfigW(IntPtr hService, uint dwServiceType, uint dwStartType,
+        uint dwErrorControl, string? lpBinaryPathName, string? lpLoadOrderGroup, IntPtr lpdwTagId,
+        string? lpDependencies, string? lpServiceStartName, string? lpPassword, string? lpDisplayName);
+
+    [System.Runtime.InteropServices.DllImport("advapi32.dll", SetLastError = true)]
+    private static extern bool CloseServiceHandle(IntPtr hSCObject);
+
+    private const uint SC_MANAGER_CONNECT = 0x0001;
+    private const uint SERVICE_CHANGE_CONFIG = 0x0002;
+    private const uint SERVICE_NO_CHANGE = 0xFFFFFFFF;
+    private const uint SERVICE_DISABLED = 0x00000004;
+    private const uint SERVICE_DEMAND_START = 0x00000003;
+
+    /// <summary>Changes a Windows service's start type via P/Invoke (avoids sc.exe fork).</summary>
+    private static bool SetServiceStartType(string serviceName, uint startType)
+    {
+        IntPtr scm = OpenSCManagerW(null, null, SC_MANAGER_CONNECT);
+        if (scm == IntPtr.Zero) return false;
+        try
+        {
+            IntPtr svc = OpenServiceW(scm, serviceName, SERVICE_CHANGE_CONFIG);
+            if (svc == IntPtr.Zero) return false;
+            try
+            {
+                return ChangeServiceConfigW(svc, SERVICE_NO_CHANGE, startType, SERVICE_NO_CHANGE,
+                    null, null, IntPtr.Zero, null, null, null, null);
+            }
+            finally { CloseServiceHandle(svc); }
+        }
+        finally { CloseServiceHandle(scm); }
+    }
+
     /// <summary>
     /// Gets the current GPU MUX mode.
     /// 0=Hybrid, 1=Discrete, 2=Eco/iGPU, -1=error.
@@ -1499,13 +1539,8 @@ internal sealed class FanControlService : ServiceBase
             if (needDisable)
             {
                 Log.Info("Disabling Micro Star SCM service...");
-                using var sc = Process.Start(new ProcessStartInfo("sc.exe")
-                {
-                    Arguments = "config \"Micro Star SCM\" start= disabled",
-                    UseShellExecute = false,
-                    CreateNoWindow = true
-                });
-                sc!.WaitForExit(5000);
+                if (!SetServiceStartType("Micro Star SCM", SERVICE_DISABLED))
+                    Log.Warn($"Failed to disable Micro Star SCM service (Win32Error={System.Runtime.InteropServices.Marshal.GetLastWin32Error()})");
             }
         }
         catch { /* Service not found or already stopped */ }
@@ -1517,13 +1552,8 @@ internal sealed class FanControlService : ServiceBase
             if (mfsSvc.StartType != ServiceStartMode.Manual)
             {
                 Log.Info("Setting MSI Foundation Service to Manual start...");
-                using var sc = Process.Start(new ProcessStartInfo("sc.exe")
-                {
-                    Arguments = "config \"MSI Foundation Service\" start= demand",
-                    UseShellExecute = false,
-                    CreateNoWindow = true
-                });
-                sc!.WaitForExit(5000);
+                if (!SetServiceStartType("MSI Foundation Service", SERVICE_DEMAND_START))
+                    Log.Warn($"Failed to set MSI Foundation Service to Manual (Win32Error={System.Runtime.InteropServices.Marshal.GetLastWin32Error()})");
             }
         }
         catch { /* Service not found yet */ }
@@ -1820,9 +1850,10 @@ internal sealed class FanControlService : ServiceBase
         // Step 4.5: Commit UEFI variable BEFORE the EC sequence.
         // BIOS may check the UEFI variable when processing EC commands;
         // writing it first (matching GPUSwitch tool order) ensures it's visible.
+        bool uefiOk = false;
         try
         {
-            bool uefiOk = UefiVariable.CommitGpuMode(mode, Log);
+            uefiOk = UefiVariable.CommitGpuMode(mode, Log);
             if (!uefiOk)
                 Log.Warn("UEFI MsiDCVarData write failed. GPU MUX may not switch on cold boot.");
         }
@@ -1913,80 +1944,123 @@ internal sealed class FanControlService : ServiceBase
                 Thread.Sleep(1000);
         }
         if (!ecSuccess)
-            Log.Warn("BIOS did not acknowledge after all attempts, proceeding with UEFI commit anyway.");
-
-        Log.Info($"GPU mode switch to {modeName} completed. *Cold boot* (shutdown + power on) required, NOT a warm reboot.");
+            Log.Warn("BIOS did not acknowledge after all attempts. UEFI variable is set — cold boot may still apply the switch.");
 
         try { CleanupMsiHelpers(); }
         catch (Exception ex) { Log.Warn($"CleanupMsiHelpers failed: {ex.Message}"); }
 
+        if (!uefiOk)
+        {
+            Log.Error($"GPU mode switch to {modeName} failed: UEFI variable write failed.");
+            return false;
+        }
+
+        if (ecSuccess)
+            Log.Info($"GPU mode switch to {modeName} completed. *Cold boot* (shutdown + power on) required, NOT a warm reboot.");
+        else
+            Log.Warn($"GPU mode switch to {modeName}: EC acknowledgment missing, but UEFI variable is set. Cold boot should still apply the switch.");
+
         return true;
     }
 
+    private static readonly TimeSpan WmiCallTimeout = TimeSpan.FromSeconds(15);
+
     /// <summary>
     /// Calls a Get_* WMI ACPI method with a single-byte command.
+    /// Wrapped with a timeout to prevent indefinite hangs if WMI is stuck.
     /// </summary>
     private byte[]? WmiCallGet(string methodName, byte cmd)
     {
         try
         {
-            using var pkgClass = new ManagementClass(
-                new ManagementScope(WmiScope),
-                new ManagementPath("Package_32"), null);
-            var pkg = pkgClass.CreateInstance();
-            var input = new byte[32];
-            input[0] = cmd;
-            pkg["Bytes"] = input;
-
-            using var searcher = new ManagementObjectSearcher(
-                WmiScope, $"SELECT * FROM {AcpiClass}");
-            foreach (ManagementObject mo in searcher.Get())
+            var task = Task.Run(() =>
             {
-                var inParams = mo.GetMethodParameters(methodName);
-                inParams["Data"] = pkg;
-                var outParams = mo.InvokeMethod(methodName, inParams, null);
-                var dataOut = outParams?["Data"] as ManagementBaseObject;
-                if (dataOut is null) return null;
-                return ExtractPackageBytes(dataOut);
-            }
+                using var pkgClass = new ManagementClass(
+                    new ManagementScope(WmiScope),
+                    new ManagementPath("Package_32"), null);
+                var pkg = pkgClass.CreateInstance();
+                var input = new byte[32];
+                input[0] = cmd;
+                pkg["Bytes"] = input;
+
+                using var searcher = new ManagementObjectSearcher(
+                    WmiScope, $"SELECT * FROM {AcpiClass}");
+                foreach (ManagementObject mo in searcher.Get())
+                {
+                    var inParams = mo.GetMethodParameters(methodName);
+                    inParams["Data"] = pkg;
+                    var outParams = mo.InvokeMethod(methodName, inParams, null);
+                    var dataOut = outParams?["Data"] as ManagementBaseObject;
+                    if (dataOut is null) return null;
+                    return ExtractPackageBytes(dataOut);
+                }
+                return null;
+            });
+
+            if (task.Wait(WmiCallTimeout))
+                return task.Result;
+
+            Log.Error($"WMI {methodName} timed out after {WmiCallTimeout.TotalSeconds}s");
+            return null;
+        }
+        catch (AggregateException ae) when (ae.InnerException is not null)
+        {
+            Log.Error($"WMI {methodName} failed: {ae.InnerException.Message}");
+            return null;
         }
         catch (Exception ex)
         {
             Log.Error($"WMI {methodName} failed: {ex.Message}");
+            return null;
         }
-        return null;
     }
 
     /// <summary>
     /// Calls a Set_* WMI ACPI method with a 32-byte input package.
+    /// Wrapped with a timeout to prevent indefinite hangs if WMI is stuck.
     /// </summary>
     private byte[]? WmiCallSet(string methodName, byte[] inputBytes)
     {
         try
         {
-            using var pkgClass = new ManagementClass(
-                new ManagementScope(WmiScope),
-                new ManagementPath("Package_32"), null);
-            var pkg = pkgClass.CreateInstance();
-            pkg["Bytes"] = inputBytes;
-
-            using var searcher = new ManagementObjectSearcher(
-                WmiScope, $"SELECT * FROM {AcpiClass}");
-            foreach (ManagementObject mo in searcher.Get())
+            var task = Task.Run(() =>
             {
-                var inParams = mo.GetMethodParameters(methodName);
-                inParams["Data"] = pkg;
-                var outParams = mo.InvokeMethod(methodName, inParams, null);
-                var dataOut = outParams?["Data"] as ManagementBaseObject;
-                if (dataOut is null) return null;
-                return ExtractPackageBytes(dataOut);
-            }
+                using var pkgClass = new ManagementClass(
+                    new ManagementScope(WmiScope),
+                    new ManagementPath("Package_32"), null);
+                var pkg = pkgClass.CreateInstance();
+                pkg["Bytes"] = inputBytes;
+
+                using var searcher = new ManagementObjectSearcher(
+                    WmiScope, $"SELECT * FROM {AcpiClass}");
+                foreach (ManagementObject mo in searcher.Get())
+                {
+                    var inParams = mo.GetMethodParameters(methodName);
+                    inParams["Data"] = pkg;
+                    var outParams = mo.InvokeMethod(methodName, inParams, null);
+                    var dataOut = outParams?["Data"] as ManagementBaseObject;
+                    if (dataOut is null) return null;
+                    return ExtractPackageBytes(dataOut);
+                }
+                return null;
+            });
+
+            if (task.Wait(WmiCallTimeout))
+                return task.Result;
+
+            Log.Error($"WMI {methodName} timed out after {WmiCallTimeout.TotalSeconds}s");
+            return null;
+        }
+        catch (AggregateException ae) when (ae.InnerException is not null)
+        {
+            Log.Error($"WMI {methodName} failed: {ae.InnerException.Message}");
+            return null;
         }
         catch (Exception ex)
         {
             Log.Error($"WMI {methodName} failed: {ex.Message}");
+            return null;
         }
-        return null;
     }
 
     /// <summary>

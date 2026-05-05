@@ -378,6 +378,7 @@ namespace MSIFlux.GUI
                 EnsureFeatureManagerServiceRunning();
 
                 bool ok = await Task.Run(() => Program.FanRunner?.SetGpuMode(mode) ?? false);
+                FanControlRunner.InvalidateGpuModeCache();
 
                 if (ok)
                 {
@@ -534,6 +535,10 @@ namespace MSIFlux.GUI
             try
             {
                 string? guid = CommonConfig.GetPowerPlanGuid(modeIndex);
+                // Fallback: if this mode's GUID is empty, use Balanced mode's GUID.
+                // If Balanced is also empty, power plan linking is disabled.
+                if (string.IsNullOrWhiteSpace(guid) && modeIndex != 2)
+                    guid = CommonConfig.GetPowerPlanGuid(2);
                 if (!string.IsNullOrWhiteSpace(guid))
                 {
                     PowerNative.SetPowerPlan(guid);

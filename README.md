@@ -6,6 +6,7 @@
 > 新增 **GPU 三模式切换**、现代化 UI, 并内置 WMI ACPI 引导器和 Feature Manager 精简文件。
 >
 > 🎯 **单体 exe, 无需安装** — 双击即用, 实测运行时后台内存仅占用 ~10MB, 非常清爽。
+> 内置 .NET 运行时检测, 未安装 .NET 8 时自动弹窗引导下载。
 
 ---
 
@@ -17,7 +18,7 @@
 - **🔋 电池充电阈值** — 0-100% 自定义充电上限, 保护电池健康
 - **📊 电池电量显示** — 实时显示电池电量百分比和充电状态
 - **⚡ 拔电自动省电** — 拔掉电源自动切换省电模式, 插电后恢复上次的性能模式
-- **🔌 电源计划联动** — 切换性能模式时自动切换 Windows 电源计划 (支持用户自定义 GUID)
+- **🔌 电源计划联动** — 切换性能模式时自动切换 Windows 电源计划 (支持用户自定义 GUID, 留空自动回退到平衡模式)
 - **💾 配置导入导出** — 支持导出当前配置为文件, 导入时自动校验机型匹配
 - **📦 单体 exe, 开箱即用** — 双击即用; 内置精简版 Feature Manager 自动提取到 `C:\ProgramData\MSI Flux\FeatureManager\`
 - **🪶 极致轻量** — 实测运行时后台内存仅占用 ~10MB, 对比 MSI Center ~950MB
@@ -37,7 +38,7 @@
 | 电池充电阈值 | ✔ | ✔ |
 | 电池电量显示 | ❌ | ✔ (SystemInformation.PowerStatus) |
 | 拔电自动省电 | ❌ | ✔ (拔电切 Eco, 插电恢复上次模式) |
-| 电源计划联动 | ❌ | ✔ (GUI 填写 GUID, 自动联动) |
+| 电源计划联动 | ❌ | ✔ (GUI 填写 GUID, 留空回退平衡, 自动联动) |
 | 配置导入导出 | ❌ | ✔ (含机型匹配校验) |
 | Win/Fn 键互换 | ✔ | ✔ |
 | 系统托盘最小化 | ❌ | ✔ |
@@ -178,26 +179,24 @@ RPM ReadReg           — 风扇 RPM 读取寄存器
 ### 前置要求
 
 - Windows 10/11 (64-bit)
-- .NET 8.0 Runtime
+- [.NET 8.0 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/8.0) (Windows x64)
 - MSI 笔记本
 - 首次使用需运行一次 GPU 切换 (自动完成 WMI ACPI 引导), 然后重启一次以激活
 - 默认配置文件: `MSI-10th-gen-or-newer-dualfan.xml` (适用于 10 代及更新双风扇机型)
 
+> 双击 `MSI Flux.exe` 即可运行。如果未安装 .NET 8, 会自动弹窗引导到下载页面。
+
 ### 构建
 
 ```powershell
-dotnet build YAMDCC.sln -c Release
+# 构建框架依赖版
+dotnet publish MSIFlux/MSIFlux.csproj -c Release -r win-x64 --self-contained false -o publish
+
+# 构建带 .NET 运行时检测的启动器 (内嵌主 exe, 自包含)
+dotnet publish Launcher/Launcher.csproj -c Release -o publish-launcher
 ```
 
-### 安装服务
-
-```powershell
-# 以管理员身份运行
-sc.exe create yamdccsvc binPath= "<构建输出路径>\yamdccsvc.exe" start= auto DisplayName= "YAMDCC Service"
-sc.exe start yamdccsvc
-```
-
-然后启动 `MSI Flux.exe` 即可使用。
+最终产物: `publish-launcher/MSI Flux.exe` (约 21MB), 双击即可运行。
 
 ---
 

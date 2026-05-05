@@ -12,7 +12,8 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <PlatformTarget>AnyCPU</PlatformTarget>
     <AllowUnsafeBlocks>True</AllowUnsafeBlocks>
-    <AssemblyVersion>3.0.0</AssemblyVersion>
+    <AssemblyVersion>1.1.0</AssemblyVersion>
+    <InformationalVersion>1.1.0</InformationalVersion>
     <RootNamespace>MSIFlux.GUI</RootNamespace>
     
     <!-- 框架依赖单文件发布 (参考 g-helper):

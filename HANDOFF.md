@@ -1,7 +1,7 @@
 # MSI Flux 交接文档
 
-**日期**: 2026-04-27  
-**作者**: Cascade (AI 辅助开发)
+**日期**: 2026-05-06
+**作者**: Cascade + Claude (AI 辅助开发)
 
 ---
 
@@ -92,6 +92,28 @@
 - 添加前置要求: Feature Manager (MSI Center 组件)
 - 移除 "无需安装 MSI Center" 的错误声明
 
+### 8. v1.1.0 代码质量优化 (2026-05-06)
+
+按优先级完成了以下优化:
+
+| # | 改动 | 文件 |
+|---|---|---|
+| #4 | SetGpuMode 返回值修正: UEFI 写入失败返回 false, EC 失败仅警告 (UEFI 是真正提交点) | `FanControlService.cs` |
+| #3 | EnsureFeatureManagerExtracted 比较文件大小, 不同时覆盖旧文件 | `Paths.cs` |
+| #11 | 日志文件超 10MB 自动轮转 (复用已有的 gzip 归档机制) | `Logger.cs` |
+| #7 | DetectGpuModeLocal 结果缓存 10 秒, GPU 切换后自动失效 | `Program.cs`, `SettingsForm.cs` |
+| #2 | WmiCallGet/WmiCallSet 加 15 秒超时保护 (Task.Run + Wait) | `FanControlService.cs` |
+| #5 | sc.exe 子进程调用替换为 P/Invoke ChangeServiceConfigW | `FanControlService.cs` |
+| — | 电源计划联动: 留空自动回退到平衡模式 GUID, 平衡也留空则不生效 | `SettingsForm.cs`, `PowerPlanForm.cs` |
+
+### 9. 分发方案 (2026-05-06)
+
+- 版本号: v1.1.0
+- 框架依赖构建: 主 exe 约 9.4MB (需要 .NET 8 Desktop Runtime)
+- 启动器: 自包含裁剪版 21MB, 内嵌主 exe, 启动时检测 .NET 运行时
+- 未安装 .NET 8 时弹窗引导用户到下载页面
+- 构建命令: `dotnet publish Launcher/Launcher.csproj -c Release -o publish-launcher`
+
 ---
 
 ## 二、仍然存在的问题和不足
@@ -115,11 +137,11 @@
 
 6. **GPU 切换需要重启** — 当前所有 GPU 模式切换都需要重启才能生效（BIOS 需要在 POST 阶段读取 EC 寄存器配置 MUX）。这是硬件限制，无法绕过。
 
-7. **IPC 超时风险** — WMI ACPI 调用如果挂起，会导致 IPC 超时（15 秒），GUI 显示切换失败。当前没有对 WMI 调用设置独立的超时机制。
+7. ~~**IPC 超时风险**~~ — ✅ 已修复 (v1.1.0): WmiCallGet/WmiCallSet 已添加 15 秒超时保护 (Task.Run + Wait)。
 
 ### 🟢 轻微问题
 
-8. **EnsureFeatureManagerExtracted() 不会覆盖已有文件** — 如果 `C:\ProgramData\MSI Flux\FeatureManager\` 已存在旧文件，新增的嵌入资源（如 MSI_ACPI.mof）不会被提取。需要手动删除该目录才能触发完整提取。
+8. ~~**EnsureFeatureManagerExtracted() 不会覆盖已有文件**~~ — ✅ 已修复 (v1.1.0): 现在比较嵌入资源和磁盘文件的大小, 不同时自动覆盖。
 
 9. **MOF 文件路径依赖** — `mofcomp` 的 `#PRAGMA AUTORECOVER` 会将 MOF 文件路径写入注册表。如果用户删除了 `C:\ProgramData\MSI Flux\FeatureManager\MSI_ACPI.mof`，WMI 仓库重建时会失败。
 
@@ -144,6 +166,10 @@
 | `FeatureManager/MSI_ACPI.mof` | 完整 WMI ACPI schema（15 个类） |
 | `FeatureManager/KernCoreLib64.Sys` | MSI 内核组件（作用不明） |
 | `Feature Manager_1.0.2312.2201.exe` | FM 安装包 |
+| `Launcher/Program.cs` | .NET 运行时检测启动器 (自包含, 内嵌主 exe) |
+| `Launcher/Launcher.csproj` | 启动器项目配置 (裁剪优化) |
+| `MSIFlux/PowerPlanForm.cs` | 电源计划 GUID 配置窗口 |
+| `MSIFlux/PowerNative.cs` | Windows 电源计划 P/Invoke |
 
 ---
 
@@ -153,7 +179,7 @@
 
 2. **研究 ServiceInstall.exe** — FM 安装目录中的 `ServiceInstall.exe` 可能负责注册内核驱动。反编译它可能找到关键信息。
 
-3. **添加 WMI 调用超时机制** — 用 `Thread.Start` + `Join(timeout)` 包装 WMI 调用，避免 IPC 超时。
+3. ~~**添加 WMI 调用超时机制**~~ — ✅ 已完成 (v1.1.0): WmiCallGet/WmiCallSet 已用 Task.Run + Wait(15s) 包装。
 
 4. **多机型测试** — 在不同 MSI 笔记本型号上测试 GPU 切换。
 
