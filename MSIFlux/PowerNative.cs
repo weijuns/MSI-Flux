@@ -1,4 +1,5 @@
 using System;
+using System.Management;
 using System.Runtime.InteropServices;
 
 namespace MSIFlux.GUI
@@ -96,6 +97,43 @@ namespace MSIFlux.GUI
                 return SetPowerPlan(guid);
             }
             return false;
+        }
+
+        /// <summary>
+        /// Gets the current screen brightness (0-100) via WMI.
+        /// Returns -1 if unable to read.
+        /// </summary>
+        public static int GetBrightness()
+        {
+            try
+            {
+                using var searcher = new ManagementObjectSearcher("root\\wmi",
+                    "SELECT CurrentBrightness FROM WmiMonitorBrightness");
+                foreach (ManagementObject obj in searcher.Get())
+                {
+                    return Convert.ToInt32(obj["CurrentBrightness"]);
+                }
+            }
+            catch { }
+            return -1;
+        }
+
+        /// <summary>
+        /// Sets the screen brightness (0-100) via WMI.
+        /// </summary>
+        public static void SetBrightness(int brightness)
+        {
+            try
+            {
+                using var searcher = new ManagementObjectSearcher("root\\wmi",
+                    "SELECT * FROM WmiMonitorBrightnessMethods");
+                foreach (ManagementObject obj in searcher.Get())
+                {
+                    obj.InvokeMethod("WmiSetBrightness", new object[] { (uint)brightness });
+                    return;
+                }
+            }
+            catch { }
         }
     }
 }

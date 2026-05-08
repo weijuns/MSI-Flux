@@ -541,7 +541,12 @@ namespace MSIFlux.GUI
                     guid = CommonConfig.GetPowerPlanGuid(2);
                 if (!string.IsNullOrWhiteSpace(guid))
                 {
+                    // Save brightness before switching, restore after to prevent
+                    // the power plan from changing screen brightness.
+                    int savedBrightness = PowerNative.GetBrightness();
                     PowerNative.SetPowerPlan(guid);
+                    if (savedBrightness >= 0)
+                        PowerNative.SetBrightness(savedBrightness);
                 }
             }
             catch { }
