@@ -492,22 +492,33 @@ namespace MSIFlux.GUI
                 {
                     _config.PerfModeConf.ModeSel = (byte)modeIndex;
                     VisualisePerfMode(modeIndex);
-                    
                     ApplyPerfModeFanConfig(modeIndex);
-                    ApplyCPUBoostForPerfMode(modeIndex);
-                    ApplyPowerPlanForPerfMode(modeIndex);
-                    
-                    if (_isAutoMode)
-                    {
-                        ApplyAutoScreenRefreshRate();
-                    }
-                    
-                    SaveConfig();
-                    
+
                     if (fansForm != null && fansForm.Visible)
                     {
                         fansForm.SetPerfMode(modeIndex);
                     }
+
+                    // Move slow operations (WMI, IPC, file I/O) off the UI thread
+                    // so the first switch after idle doesn't feel sluggish.
+                    int capturedMode = modeIndex;
+                    _ = Task.Run(() =>
+                    {
+                        try
+                        {
+                            ApplyCPUBoostForPerfMode(capturedMode);
+                            ApplyPowerPlanForPerfMode(capturedMode);
+                            if (_isAutoMode)
+                            {
+                                this.Invoke(() => ApplyAutoScreenRefreshRate());
+                            }
+                            SaveConfig();
+                        }
+                        catch (Exception ex)
+                        {
+                            Debug.WriteLine($"[SetPerformanceMode] background error: {ex.Message}");
+                        }
+                    });
                 }
             }
         }
@@ -522,10 +533,13 @@ namespace MSIFlux.GUI
             if (_perfModeCPUBoostMap.TryGetValue(modeIndex, out int boostValue))
             {
                 PowerNative.SetCPUBoost(boostValue);
-                
+
                 if (fansForm != null && fansForm.Visible)
                 {
-                    fansForm.SetCPUBoost(boostValue);
+                    if (InvokeRequired)
+                        BeginInvoke(() => fansForm.SetCPUBoost(boostValue));
+                    else
+                        fansForm.SetCPUBoost(boostValue);
                 }
             }
         }
@@ -539,14 +553,19 @@ namespace MSIFlux.GUI
                 // If Balanced is also empty, power plan linking is disabled.
                 if (string.IsNullOrWhiteSpace(guid) && modeIndex != 2)
                     guid = CommonConfig.GetPowerPlanGuid(2);
-                if (!string.IsNullOrWhiteSpace(guid))
+                if (string.IsNullOrWhiteSpace(guid)) return;
+
+                int savedBrightness = PowerNative.GetBrightness();
+                if (savedBrightness >= 0 && Guid.TryParse(guid, out Guid planGuid))
                 {
-                    // Save brightness before switching, restore after to prevent
-                    // the power plan from changing screen brightness.
-                    int savedBrightness = PowerNative.GetBrightness();
+                    // Set the target scheme's brightness BEFORE switching to it,
+                    // so the OS applies the correct brightness on activation.
+                    PowerNative.SetSchemeBrightness(planGuid, savedBrightness);
+                    PowerNative.SetPowerPlan(planGuid);
+                }
+                else
+                {
                     PowerNative.SetPowerPlan(guid);
-                    if (savedBrightness >= 0)
-                        PowerNative.SetBrightness(savedBrightness);
                 }
             }
             catch { }

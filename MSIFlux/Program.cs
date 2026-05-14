@@ -611,6 +611,10 @@ namespace MSIFlux.GUI
         private readonly object _lock = new();
         private bool _disposed;
 
+        // Temporarily suppress polling during mode switches to avoid
+        // IPC contention when the service is busy with EC writes.
+        private volatile bool _pollSuspended;
+
         public event EventHandler<TempEventArgs>? TempUpdated;
 
         public int CpuTemp { get; private set; }
@@ -696,7 +700,7 @@ namespace MSIFlux.GUI
         /// </summary>
         private void PollOnce()
         {
-            if (!_ipc.IsConnected || _config == null) return;
+            if (_pollSuspended || !_ipc.IsConnected || _config == null) return;
 
             var fans = _config.FanConfs;
             if (fans == null || fans.Count == 0) return;
@@ -827,25 +831,41 @@ namespace MSIFlux.GUI
 
         public void SetPerfMode(int mode)
         {
-            _ipc.SetPerfMode(mode);
-            // 服务端内部会应用; 本地缓存里同步一下以便 UI 显示
-            if (_config?.PerfModeConf != null &&
-                mode >= 0 && mode < _config.PerfModeConf.PerfModes.Count)
+            _pollSuspended = true;
+            try
             {
-                _config.PerfModeConf.ModeSel = mode;
+                _ipc.SetPerfMode(mode);
+                // 服务端内部会应用; 本地缓存里同步一下以便 UI 显示
+                if (_config?.PerfModeConf != null &&
+                    mode >= 0 && mode < _config.PerfModeConf.PerfModes.Count)
+                {
+                    _config.PerfModeConf.ModeSel = mode;
+                }
+            }
+            finally
+            {
+                _pollSuspended = false;
             }
         }
 
         public void SetFanProfile(int profile)
         {
-            _ipc.SetFanProf(profile);
-            if (_config != null && profile >= 0)
+            _pollSuspended = true;
+            try
             {
-                foreach (var fan in _config.FanConfs)
+                _ipc.SetFanProf(profile);
+                if (_config != null && profile >= 0)
                 {
-                    if (profile < fan.FanCurveConfs.Count)
-                        fan.CurveSel = profile;
+                    foreach (var fan in _config.FanConfs)
+                    {
+                        if (profile < fan.FanCurveConfs.Count)
+                            fan.CurveSel = profile;
+                    }
                 }
+            }
+            finally
+            {
+                _pollSuspended = false;
             }
         }
 

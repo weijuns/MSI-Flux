@@ -287,6 +287,10 @@ public class NamedPipeClient<TRead, TWrite> : IDisposable
         Connection.Error += ConnectionOnError;
         Connection.Open();
 
+        // Connection succeeded — reset the reconnect backoff so the next
+        // disconnect starts from the minimum delay instead of a ratcheted-up value.
+        _reconnectDelay = 1000;
+
         _connected.Set();
         Connected?.Invoke(this, new PipeConnectionEventArgs<TRead, TWrite>(Connection));
     }

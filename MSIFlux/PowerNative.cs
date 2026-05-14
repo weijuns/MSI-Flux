@@ -38,6 +38,10 @@ namespace MSIFlux.GUI
         static readonly Guid GUID_CPU = new Guid("54533251-82be-4824-96c1-47b60b740d00");
         static readonly Guid GUID_BOOST = new Guid("be337238-0d82-4146-a960-4f3749d470c7");
 
+        // Video subgroup and brightness setting GUIDs for display brightness
+        static readonly Guid GUID_VIDEO_SUBGROUP = new Guid("7516b95f-f776-4464-8c53-06167f40cc99");
+        static readonly Guid GUID_VIDEO_BRIGHTNESS = new Guid("aded5e82-b909-4619-9949-f5d71dac0bcb");
+
         static Guid GetActiveScheme()
         {
             IntPtr pActiveSchemeGuid;
@@ -87,6 +91,24 @@ namespace MSIFlux.GUI
         {
             var hr = PowerSetActiveScheme(IntPtr.Zero, planGuid);
             return hr == 0;
+        }
+
+        /// <summary>
+        /// Pre-sets the display brightness values (AC + DC) on a specific power
+        /// scheme without activating it.  This way, when <see cref="SetPowerPlan"/>
+        /// activates the scheme, the OS applies the desired brightness from the
+        /// start — no race condition.
+        /// </summary>
+        public static void SetSchemeBrightness(Guid schemeGuid, int brightness)
+        {
+            try
+            {
+                PowerWriteACValueIndex(IntPtr.Zero, schemeGuid,
+                    GUID_VIDEO_SUBGROUP, GUID_VIDEO_BRIGHTNESS, brightness);
+                PowerWriteDCValueIndex(IntPtr.Zero, schemeGuid,
+                    GUID_VIDEO_SUBGROUP, GUID_VIDEO_BRIGHTNESS, brightness);
+            }
+            catch { }
         }
 
         public static bool SetPowerPlan(string? planGuid)

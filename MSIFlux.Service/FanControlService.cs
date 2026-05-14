@@ -290,9 +290,36 @@ internal sealed class FanControlService : ServiceBase
                 break;
             }
             case Command.ApplyConf:
+            {
                 parseSuccess = true;
-                cmdSuccess = LoadConf() && ApplyConf();
+                bool loaded = LoadConf();
+                if (loaded)
+                {
+                    // Respond immediately, then apply EC writes in background.
+                    sendSuccessMsg = false;
+                    IPCServer.PushMessage(new ServiceResponse(
+                        Response.Success, (int)cmd), id);
+                    _ = Task.Run(() =>
+                    {
+                        try
+                        {
+                            bool ok = ApplyConf();
+                            if (!ok)
+                                Log.Warn("ApplyConf failed");
+                        }
+                        catch (Exception ex)
+                        {
+                            Log.Error($"ApplyConf exception: {ex.Message}");
+                        }
+                    });
+                    cmdSuccess = true;
+                }
+                else
+                {
+                    cmdSuccess = false;
+                }
                 break;
+            }
             case Command.SetFullBlast:
             {
                 if (args.Length == 1 && args[0] is int enable)
@@ -397,7 +424,26 @@ internal sealed class FanControlService : ServiceBase
                             cfg.CurveSel = Math.Max(0, Math.Min(fanProf, count - 1));
                         }
                     }
-                    cmdSuccess = ApplyConf();
+
+                    // Respond immediately, then apply EC writes in background
+                    // (same rationale as SetPerfMode).
+                    sendSuccessMsg = false;
+                    IPCServer.PushMessage(new ServiceResponse(
+                        Response.Success, (int)cmd), id);
+                    _ = Task.Run(() =>
+                    {
+                        try
+                        {
+                            bool ok = ApplyConf();
+                            if (!ok)
+                                Log.Warn("SetFanProf ApplyConf failed");
+                        }
+                        catch (Exception ex)
+                        {
+                            Log.Error($"SetFanProf ApplyConf exception: {ex.Message}");
+                        }
+                    });
+                    cmdSuccess = true;
                 }
                 break;
             }
@@ -425,7 +471,31 @@ internal sealed class FanControlService : ServiceBase
                         {
                             cfg.ModeSel = Math.Max(0, Math.Min(perfMode, count - 1));
                         }
-                        cmdSuccess = ApplyConf();
+
+                        // Respond immediately so the GUI doesn't time out, then
+                        // apply EC writes in the background.  ApplyConf() does
+                        // dozens of sequential EC writes that can take several
+                        // seconds; running it on the pipe read thread blocks all
+                        // IPC until it finishes.
+                        sendSuccessMsg = false;
+                        IPCServer.PushMessage(new ServiceResponse(
+                            Response.Success, (int)cmd), id);
+                        int capturedMode = perfMode;
+                        PerfModeConf capturedCfg = cfg;
+                        _ = Task.Run(() =>
+                        {
+                            try
+                            {
+                                bool ok = ApplyConf();
+                                if (!ok)
+                                    Log.Warn($"SetPerfMode ApplyConf failed (mode={capturedMode})");
+                            }
+                            catch (Exception ex)
+                            {
+                                Log.Error($"SetPerfMode ApplyConf exception: {ex.Message}");
+                            }
+                        });
+                        cmdSuccess = true;
                     }
                 }
                 break;

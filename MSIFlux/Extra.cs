@@ -91,8 +91,8 @@ namespace MSIFlux.GUI
         {
             _config = config;
             InitUIFromConfig();
-            UpdateMSIServiceStatus();
-            UpdateFanControlStatus();
+            // Service status checks are done async in Extra_Load —
+            // don't block the UI thread here.
         }
 
         private async void Extra_Load(object? sender, EventArgs e)
