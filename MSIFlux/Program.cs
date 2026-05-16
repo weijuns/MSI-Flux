@@ -97,6 +97,11 @@ namespace MSIFlux.GUI
                     return InstallServiceEntry();
                 }
 
+                if (args.Contains("--stop-service"))
+                {
+                    return StopServiceEntry();
+                }
+
                 if (args.Contains("--uninstall-service"))
                 {
                     return UninstallServiceEntry();
@@ -190,6 +195,12 @@ namespace MSIFlux.GUI
         {
             if (!ServiceManager.IsCurrentProcessElevated()) return 2;
             return ServiceManager.Uninstall() ? 0 : 3;
+        }
+
+        private static int StopServiceEntry()
+        {
+            if (!ServiceManager.IsCurrentProcessElevated()) return 2;
+            return ServiceManager.Stop(TimeSpan.FromSeconds(15)) ? 0 : 3;
         }
 
         // ================================================================

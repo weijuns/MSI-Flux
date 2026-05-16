@@ -23,6 +23,7 @@
 - **📦 单体 exe, 开箱即用** — 双击即用; 内置精简版 Feature Manager 自动提取到 `C:\ProgramData\MSI Flux\FeatureManager\`
 - **🪶 极致轻量** — 实测运行时后台内存仅占用 ~10MB, 对比 MSI Center ~950MB
 - **🎨 现代化 UI** — 参考 [G-Helper](https://github.com/seerge/g-helper) 设计的简洁界面
+- **🚪 干净退出** — 托盘右键退出时自动停止后台服务 (WinRing0 驱动卸载), 无残留进程
 
 ---
 
@@ -42,6 +43,7 @@
 | 配置导入导出 | ❌ | ✔ (含机型匹配校验) |
 | Win/Fn 键互换 | ✔ | ✔ |
 | 系统托盘最小化 | ❌ | ✔ |
+| 干净退出 (停止服务) | ❌ | ✔ (退出时停止后台服务, 卸载驱动) |
 | 开机自启动 | ❌ | ✔ (Task Scheduler) |
 | UI 界面 | WinForms 传统界面 | 现代化卡片式 UI (参考 G-Helper) |
 | 目标框架 | .NET Framework 4.8 | .NET 8.0-windows |

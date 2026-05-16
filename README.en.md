@@ -23,6 +23,7 @@
 - **📦 Single exe, out of the box** — Just double-click. Bundled minimal Feature Manager auto-extracts to `C:\ProgramData\MSI Flux\FeatureManager\`
 - **🪶 Ultra lightweight** — Runtime memory usage only ~10MB, compared to MSI Center's ~950MB
 - **🎨 Modern UI** — Clean interface design inspired by [G-Helper](https://github.com/seerge/g-helper)
+- **🚪 Clean Exit** — Quit from tray auto-stops the background service (WinRing0 driver unload), no leftover processes
 
 ---
 
@@ -42,6 +43,7 @@
 | Config Import/Export | ❌ | ✔ (with model mismatch validation) |
 | Win/Fn Key Swap | ✔ | ✔ |
 | System Tray | ❌ | ✔ |
+| Clean Exit (stop service) | ❌ | ✔ (stops background service on exit, unloads driver) |
 | Auto-start on Boot | ❌ | ✔ (Task Scheduler) |
 | UI Interface | WinForms traditional UI | Modern card-style UI (inspired by G-Helper) |
 | Target Framework | .NET Framework 4.8 | .NET 8.0-windows |

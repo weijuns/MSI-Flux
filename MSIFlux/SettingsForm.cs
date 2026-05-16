@@ -416,7 +416,7 @@ namespace MSIFlux.GUI
                     bool hasMsiApSvc = System.IO.File.Exists(msiApSvcPath);
                     string details = hasMsiApSvc
                         ? "MSI Foundation Service 启动失败。可能原因：服务二进制路径已失效，请重试（会自动修复）。"
-                        : "未找到 MSIAPService.exe。请先安装 Feature Manager。";
+                        : "未找到 MSIAPService.exe。请尝试重新启动 MSI Flux（资源文件会自动提取）。";
 
                     MessageBox.Show(
                         $"显卡模式切换失败：{modeName}\n\n{details}",
@@ -674,10 +674,7 @@ namespace MSIFlux.GUI
 
         private void ButtonQuit_Click(object? sender, EventArgs e)
         {
-            Close();
-            // Use Environment.Exit to guarantee process termination,
-            // even if the WinRing0 driver is stuck in kernel mode.
-            Environment.Exit(0);
+            StopServiceAndExit();
         }
 
         private void ButtonFans_Click(object? sender, EventArgs e) => FansToggle();
@@ -787,9 +784,34 @@ namespace MSIFlux.GUI
         
         private void ExitMenuItem_Click(object sender, EventArgs e)
         {
+            StopServiceAndExit();
+        }
+
+        private void StopServiceAndExit()
+        {
             CloseAllChildForms();
-            // Use Environment.Exit to guarantee process termination,
-            // even if the WinRing0 driver is stuck in kernel mode.
+
+            try
+            {
+                if (Helpers.ServiceManager.IsRunning())
+                {
+                    // 直接尝试停止 (管理员或有权限的用户会成功)
+                    if (!Helpers.ServiceManager.Stop(TimeSpan.FromSeconds(5)))
+                    {
+                        // 权限不足, 提权停止
+                        Helpers.ServiceManager.RelaunchElevated("--stop-service");
+                    }
+                }
+            }
+            catch { }
+
+            // 清理托盘图标
+            if (notifyIcon != null)
+            {
+                notifyIcon.Visible = false;
+                notifyIcon.Dispose();
+            }
+
             Environment.Exit(0);
         }
         

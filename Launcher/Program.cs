@@ -58,6 +58,9 @@ static class Launcher
 
     private static void ExtractAndRun()
     {
+        // 清理旧的临时目录 (每次启动都会创建一个, 不清理会越积越多)
+        CleanupOldTempDirs();
+
         string tempDir = Path.Combine(Path.GetTempPath(), "MSI_Flux_" + Guid.NewGuid().ToString("N")[..8]);
         Directory.CreateDirectory(tempDir);
 
@@ -87,5 +90,19 @@ static class Launcher
         {
             MessageBoxW(IntPtr.Zero, $"Failed to launch MSI Flux:\n{ex.Message}", "MSI Flux", MB_OK);
         }
+    }
+
+    private static void CleanupOldTempDirs()
+    {
+        try
+        {
+            string tempRoot = Path.GetTempPath();
+            foreach (var dir in Directory.GetDirectories(tempRoot, "MSI_Flux_*"))
+            {
+                try { Directory.Delete(dir, recursive: true); }
+                catch { /* 正在使用, 跳过 */ }
+            }
+        }
+        catch { }
     }
 }

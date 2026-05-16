@@ -1,7 +1,8 @@
 # MSI Flux 交接文档
 
-**日期**: 2026-05-06
-**作者**: Cascade + Claude (AI 辅助开发)
+**日期**: 2026-05-16 (更新)
+**原作者**: Cascade + Claude (AI 辅助开发)
+**更新说明**: 修正过时的 Feature Manager 依赖描述, 与 README 和代码实际实现对齐
 
 ---
 
@@ -22,21 +23,20 @@
 6. WMI ACPI 调用序列（带重试，最多 3 次）: `Get_AP(0)` → `Set_Data(0xD1)` → 等待 3s → `Set_Data(0xBE)`
 7. 提示用户冷启动生效
 
-### 2. Feature Manager 依赖处理
+### 2. WMI ACPI 自动引导 (2026-05-02 突破 — 无需安装 Feature Manager)
 
-**关键发现**: Feature Manager **必须保留安装**，卸载后 WMI ACPI 方法调用会永久挂起。
+**关键发现**: 通过逆向 `wmiacpi.sys` 驱动的加载机制, 发现只需两个条件即可让 WMI ACPI 方法工作:
 
-已验证的失败方案:
-- `mofcomp` 注册完整 MOF schema（15 个 WMI 类）→ 方法调用仍挂起
-- WMI 仓库重建 (`winmgmt /salvagerepository`) → 无效
-- 系统重启 → 无效
-- PNP0C14 设备禁用/启用 → 无效
-- 只有重新安装 FM 才能恢复
+1. `msiapcfg.dll` (16KB 的 BMF-in-PE 文件) 放到 `C:\Windows\SysWOW64\`
+2. `MofImagePath` 注册表值指向上述 dll
 
-**当前方案**:
-- FM 安装但服务不自启（MSI Foundation Service 设为 Manual，Micro Star SCM 设为 Disabled）
-- MSI Flux 首次 GPU 切换时自动配置服务
-- 项目内置 `Feature Manager_1.0.2312.2201.exe` 安装包供用户安装
+**当前方案**: 完全不依赖 Feature Manager 安装。
+- `msiapcfg.dll` 内置为嵌入资源, 首次 GPU 切换时由 `WmiAcpiBootstrap.EnsureInstalled()` 自动提取并复制到 SysWOW64
+- 自动设置 `HKLM\SYSTEM\CurrentControlSet\Services\WmiAcpi\MofImagePath`
+- 首次引导后需重启一次以激活 WMI 绑定
+- WMI 仓库损坏时, `SetGpuMode` 会自动用内置的 `MSI_ACPI.mof` 修复
+
+**旧方案 (已废弃)**: 曾尝试要求用户安装 Feature Manager, 但逆向后发现只需 `msiapcfg.dll` + 注册表即可。`Feature Manager_1.0.2312.2201.exe` 安装包仍保留在项目中作为备用, 但正常使用不需要。
 
 ### 3. WMI ACPI MOF Schema
 
@@ -88,9 +88,9 @@
 
 ### 7. README 更新
 
-- 中英文 README 均已更新，说明 FM 依赖和安装步骤
-- 添加前置要求: Feature Manager (MSI Center 组件)
-- 移除 "无需安装 MSI Center" 的错误声明
+- 中英文 README 均已更新
+- ~~添加前置要求: Feature Manager (MSI Center 组件)~~ — 已在 2026-05-02 突破后撤回, 当前 README 说明"完全不依赖 Feature Manager 安装"
+- 移除 "无需安装 MSI Center" 的错误声明 → 后因 WMI ACPI 引导器实现, README 恢复为"无需安装"
 
 ### 8. v1.1.0 代码质量优化 (2026-05-06)
 
@@ -114,24 +114,34 @@
 - 未安装 .NET 8 时弹窗引导用户到下载页面
 - 构建命令: `dotnet publish Launcher/Launcher.csproj -c Release -o publish-launcher`
 
+### 10. v1.2.0 代码质量优化 + 退出清理 (2026-05-17)
+
+| # | 改动 | 文件 |
+|---|---|---|
+| 1 | Launcher 临时目录泄漏修复: 启动前清理旧 `MSI_Flux_*` 临时目录 | `Launcher/Program.cs` |
+| 2 | FanControlService.cs 拆分: GPU 切换逻辑 (~1000 行) 抽到 `GpuSwitchService.cs` (partial class) | `GpuSwitchService.cs`, `FanControlService.cs` |
+| 3 | InstallUtil 重复代码提取: 3 处重复块合并为 `EnsureMsiFoundationServiceRunning` + `InstallAndStartMsiFoundationService` | `GpuSwitchService.cs` |
+| 4 | 替换 schtasks 为 `CreateProcessAsUserW` P/Invoke: 直接在用户 Session 启动进程, 不再依赖临时任务计划 | `GpuSwitchService.cs` |
+| 5 | `StartServiceWithRetry` sleep 修复: 用 `WaitForStatus` + `TimeoutException` 替代无条件 `Sleep(2000)` | `GpuSwitchService.cs` |
+| 6 | SetGpuMode 120 秒超时保护: IPC handler 用 `Task.Run + Wait(120s)` 包装 | `FanControlService.cs` |
+| 7 | 干净退出: 托盘退出时停止 MSIFluxService (WinRing0 驱动卸载) + 新增 `--stop-service` CLI 参数 | `SettingsForm.cs`, `Program.cs` |
+| 8 | 修正过时注释: "请先安装 Feature Manager" 等旧描述 | `SettingsForm.cs`, `GpuSwitchService.cs` |
+
 ---
 
 ## 二、仍然存在的问题和不足
 
 ### 🔴 严重问题
 
-1. **Feature Manager 必须安装** — 这是最大的限制。用户必须先安装 MSI Center（含 Feature Manager 组件），GPU 切换才能工作。无法实现"完全脱离 MSI Center"的初衷。原因未知，可能与 FM 安装时注册的内核级组件有关，但具体机制未查明。
+1. ~~**Feature Manager 必须安装**~~ — ✅ 已解决 (2026-05-02): 通过逆向 `wmiacpi.sys` 发现只需 `msiapcfg.dll` + `MofImagePath` 注册表即可。`WmiAcpiBootstrap.EnsureInstalled()` 首次运行自动完成引导, 无需安装 FM。
 
 2. **KernCoreLib64.Sys 作用不明** — 此文件被嵌入为资源但实际作用未确认。它不是注册为 Windows 驱动服务的内核驱动（Subsystem=0，非标准 PE），可能是被 MSIAPService.exe 加载的数据文件或辅助库。当前代码不会主动安装/加载它。
 
-3. **WMI ACPI 方法调用挂起问题未根治** — FM 卸载后 WMI 方法调用挂起的根本原因未查明。可能的方向:
-   - FM 安装时通过 `ServiceInstall.exe` 注册了某个内核驱动或 ACPI 过滤器
-   - FM 安装时修改了 ACPI BIOS 的 WMI 数据块配置
-   - `KernCoreLib64.Sys` 可能是关键组件但安装方式未知
+3. ~~**WMI ACPI 方法调用挂起问题未根治**~~ — ✅ 已绕过 (2026-05-02): FM 卸载后 WMI 挂起的根本原因仍未查明, 但 WMI ACPI 引导器绕过了这个问题 — 直接让 `wmiacpi.sys` 加载 MSI ACPI 绑定, 不依赖 FM 安装状态。
 
 ### 🟡 中等问题
 
-4. **Feature Manager Service.exe 无法独立运行** — 它是 WPF 应用，启动时在 `MainWindow..ctor()` 中因缺少 MSI Center 组件而抛出 `FileNotFoundException` 崩溃。当前方案跳过 FM Service，只依赖 MSI Foundation Service + 注册表写入。但 FM Service 可能在某些机型上是必要的（使 EC 写入 + 注册表修改在重启后生效）。
+4. **Feature Manager Service.exe 无法独立运行** — 它是 WPF 应用，启动时在 `MainWindow..ctor()` 中因缺少 MSI Center 组件而抛出 `FileNotFoundException` 崩溃。当前方案跳过 FM Service，只依赖 MSI Foundation Service + 注册表写入。由于已实现 WMI ACPI 引导器绕过 FM 依赖, 此问题影响范围有限, 仅在部分机型可能需要 FM Service 来确保 EC 写入在重启后生效。
 
 5. **EnsureMsiRegistryKeys() 可能不完整** — 当前只创建 `FW_GPU_CH` 和 `FW_CurrentNewGPU` 两个注册表值。MSI Center 可能还需要 `FW_SupportNewGPU`, `FW_SupportUMA`, `FW_SupportDiscrete` 等值才能正确触发切换。在 FM 已安装的机器上这些值已存在，但在全新安装的机器上可能缺失。
 
@@ -153,19 +163,20 @@
 
 | 文件 | 说明 |
 |---|---|
-| `MSIFlux.Service/FanControlService.cs` | GPU 切换核心逻辑 (`SetGpuMode`, `WmiCallGet`, `WmiCallSet`, `EnsureMsiRegistryKeys`) |
+| `MSIFlux.Service/FanControlService.cs` | 服务主体: EC 读写、风扇控制、IPC 消息处理、配置加载 |
+| `MSIFlux.Service/GpuSwitchService.cs` | GPU 切换逻辑: `SetGpuMode`, WMI ACPI 调用, 服务管理, `CreateProcessAsUserW` |
+| `MSIFlux.Service/WmiAcpiBootstrap.cs` | WMI ACPI 引导器: 复制 msiapcfg.dll + 设置 MofImagePath, 摆脱 FM 依赖 |
 | `MSIFlux.Service/UefiVariable.cs` | UEFI 变量读写 (`MsiDCVarData`, `CommitGpuMode`) |
 | `MSIFlux/NativeInterop.cs` | GUI 侧 `EnumDisplayDevices` P/Invoke 声明 |
-| `MSIFlux/Program.cs` | GUI 侧 GPU 模式本地检测 (`DetectGpuModeLocal`) + IPC 报告 |
+| `MSIFlux/Program.cs` | 入口: GUI / --service / --install-service / --stop-service 分派; GPU 模式本地检测 |
 | `MSIFlux/MSIFlux.csproj` | 嵌入资源配置 |
 | `MSIFlux.Common/Paths.cs` | `EnsureFeatureManagerExtracted()` 资源提取 |
 | `MSIFlux.Common/Utils.cs` | `IsMSIServiceRunning()` 冲突检测（已排除 MSI Foundation Service） |
 | `MSIFlux/SettingsForm.cs` | GUI 端 GPU 切换按钮和 `EnsureFeatureManagerServiceRunning()` |
 | `MSIFlux/Helpers/ServiceIpcProxy.cs` | IPC 代理（含 `ReportGpuMode`） |
 | `MSIFlux.IPC/ServiceCommand.cs` | IPC 命令定义（含 `ReportGpuMode`） |
-| `FeatureManager/MSI_ACPI.mof` | 完整 WMI ACPI schema（15 个类） |
-| `FeatureManager/KernCoreLib64.Sys` | MSI 内核组件（作用不明） |
-| `Feature Manager_1.0.2312.2201.exe` | FM 安装包 |
+| `FeatureManager/MSI_ACPI.mof` | 完整 WMI ACPI schema（15 个类），WMI 仓库损坏时自动修复用 |
+| `FeatureManager/KernCoreLib64.Sys` | MSI 内核组件（作用不明，当前未使用） |
 | `Launcher/Program.cs` | .NET 运行时检测启动器 (自包含, 内嵌主 exe) |
 | `Launcher/Launcher.csproj` | 启动器项目配置 (裁剪优化) |
 | `MSIFlux/PowerPlanForm.cs` | 电源计划 GUID 配置窗口 |
@@ -175,12 +186,12 @@
 
 ## 四、后续工作建议
 
-1. **研究 FM 安装时注册的内核组件** — 用 Procmon 监控 FM 安装过程，找出它注册了什么驱动/过滤器。如果能找到并独立安装，就能摆脱 FM 依赖。
+1. ~~**研究 FM 安装时注册的内核组件**~~ — ✅ 已不再需要 (2026-05-02): WMI ACPI 引导器已绕过 FM 依赖。仅 `msiapcfg.dll` + `MofImagePath` 注册表即可工作。
 
-2. **研究 ServiceInstall.exe** — FM 安装目录中的 `ServiceInstall.exe` 可能负责注册内核驱动。反编译它可能找到关键信息。
+2. ~~**研究 ServiceInstall.exe**~~ — ✅ 已不再需要: 同上。
 
 3. ~~**添加 WMI 调用超时机制**~~ — ✅ 已完成 (v1.1.0): WmiCallGet/WmiCallSet 已用 Task.Run + Wait(15s) 包装。
 
-4. **多机型测试** — 在不同 MSI 笔记本型号上测试 GPU 切换。
+4. **多机型测试** — 在不同 MSI 笔记本型号上测试 GPU 切换。当前仅在绝影 14 (Stealth 14) 上验证。
 
-5. **实现 FM Service 的替代方案** — 如果某些机型需要 FM Service 才能切换，需要找到它执行的关键动作并用代码替代。
+5. **实现 FM Service 的替代方案** — 如果某些机型需要 FM Service 才能切换，需要找到它执行的关键动作并用代码替代。优先级较低，因 WMI ACPI 引导器已解决大部分场景。
