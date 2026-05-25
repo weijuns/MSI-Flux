@@ -48,6 +48,29 @@ internal sealed class ServiceIpcProxy : IDisposable
 
     public bool IsConnected => _connected;
 
+    /// <summary>
+    /// 强制重建管道连接. 空闲时间过长后管道可能变"死" (底层句柄已断,
+    /// 但 _connected 标志未更新). 调用此方法关闭旧管道、创建新管道并重新连接.
+    /// </summary>
+    public void ForceReconnect()
+    {
+        try
+        {
+            _connected = false;
+            _pipe.Stop();
+        }
+        catch { }
+
+        try
+        {
+            _pipe.Start();
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"[ServiceIpcProxy] ForceReconnect Start 失败: {ex.Message}");
+        }
+    }
+
     public ServiceIpcProxy()
     {
         _pipe = new NamedPipeClient<ServiceResponse, ServiceCommand>(PipeName)

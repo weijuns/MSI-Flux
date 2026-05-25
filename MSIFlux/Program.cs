@@ -818,8 +818,6 @@ namespace MSIFlux.GUI
         /// </summary>
         public bool ApplyConfig()
         {
-            if (!_ipc.IsConnected) return false;
-
             lock (_lock)
             {
                 if (_config != null)
@@ -835,7 +833,24 @@ namespace MSIFlux.GUI
                 }
             }
 
-            return _ipc.ApplyConf(TimeSpan.FromSeconds(3));
+            if (!_ipc.IsConnected)
+            {
+                SafeLog("ApplyConfig: IPC 未连接, 尝试重连...", LogLevel.Warn);
+                _ipc.ForceReconnect();
+                Thread.Sleep(500);
+            }
+
+            bool ok = _ipc.ApplyConf(TimeSpan.FromSeconds(3));
+            if (!ok)
+            {
+                SafeLog("ApplyConfig 首次失败, 重连后重试...", LogLevel.Warn);
+                _ipc.ForceReconnect();
+                Thread.Sleep(1000);
+                ok = _ipc.ApplyConf(TimeSpan.FromSeconds(3));
+                if (!ok)
+                    SafeLog("ApplyConfig 重试仍然失败", LogLevel.Error);
+            }
+            return ok;
         }
 
         public void SetFullBlast(int enable) => _ipc.SetFullBlast(enable);
@@ -845,7 +860,14 @@ namespace MSIFlux.GUI
             _pollSuspended = true;
             try
             {
-                _ipc.SetPerfMode(mode);
+                bool ok = _ipc.SetPerfMode(mode);
+                if (!ok)
+                {
+                    SafeLog("SetPerfMode 首次失败, 重连后重试...", LogLevel.Warn);
+                    _ipc.ForceReconnect();
+                    Thread.Sleep(1000);
+                    _ipc.SetPerfMode(mode);
+                }
                 // 服务端内部会应用; 本地缓存里同步一下以便 UI 显示
                 if (_config?.PerfModeConf != null &&
                     mode >= 0 && mode < _config.PerfModeConf.PerfModes.Count)
@@ -864,7 +886,14 @@ namespace MSIFlux.GUI
             _pollSuspended = true;
             try
             {
-                _ipc.SetFanProf(profile);
+                bool ok = _ipc.SetFanProf(profile);
+                if (!ok)
+                {
+                    SafeLog("SetFanProfile 首次失败, 重连后重试...", LogLevel.Warn);
+                    _ipc.ForceReconnect();
+                    Thread.Sleep(1000);
+                    _ipc.SetFanProf(profile);
+                }
                 if (_config != null && profile >= 0)
                 {
                     foreach (var fan in _config.FanConfs)
