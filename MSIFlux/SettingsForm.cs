@@ -677,9 +677,25 @@ namespace MSIFlux.GUI
         {
             if (extraForm != null && !extraForm.IsDisposed)
             {
+                extraForm.StartPosition = FormStartPosition.Manual;
+
                 // 右侧边在主页面的左侧，底边与主页面底边平行
                 int extraFormLeft = this.Left - extraForm.Width;
                 int extraFormTop = this.Bottom - extraForm.Height;
+
+                Screen screen = Screen.FromControl(this);
+                Rectangle wa = screen.WorkingArea;
+
+                // 保底: 不能掉到任务栏下方
+                if (extraFormTop + extraForm.Height > wa.Bottom)
+                    extraFormTop = wa.Bottom - extraForm.Height;
+
+                // 保顶: 不能顶出屏幕上方
+                extraFormTop = Math.Max(wa.Top, extraFormTop);
+
+                // 保左
+                extraFormLeft = Math.Max(wa.Left, extraFormLeft);
+
                 extraForm.Location = new Point(extraFormLeft, extraFormTop);
             }
         }

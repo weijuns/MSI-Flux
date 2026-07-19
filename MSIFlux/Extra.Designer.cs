@@ -70,7 +70,7 @@ namespace MSIFlux.GUI
             this.MinimizeBox = false;
             this.Name = "Extra";
             this.ShowIcon = false;
-            this.StartPosition = FormStartPosition.CenterParent;
+            this.StartPosition = FormStartPosition.Manual;
             this.Text = "更多设置";
 
             // ===== 头部 =====
