@@ -354,7 +354,7 @@ public sealed class FanControlRunner : IDisposable
                 case "balanced":
                 case "平衡模式":
                     displayName = "平衡模式";
-                    icon = Properties.Resources.icons8_spa_flower_48;
+                    icon = Properties.Resources.icons8_fiat_500_48;
                     break;
                 case "high performance":
                 case "turbo":
