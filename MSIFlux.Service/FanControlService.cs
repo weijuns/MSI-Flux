@@ -56,11 +56,25 @@ internal sealed partial class FanControlService : ServiceBase
 
     private readonly System.Timers.Timer CooldownTimer = new(1000);
 
+    /// <summary>Fn 热键轮询任务取消令牌</summary>
+    private CancellationTokenSource? _hotkeyCts;
 
+    /// <summary>上次 EC[0xC0] 的值, 用于去重</summary>
+    private int _lastHotkeyCode = -1;
+
+    /// <summary>热键处理后冷却截止时间 (UTC), 防止 ApplyConf 的 EC 写入触发反馈环路</summary>
+    private DateTime _hotkeyCooldownUntil = DateTime.MinValue;
 
     private EcInfo EcInfo;
 
     private bool FullBlastEnabled;
+
+    // ====== EC 热键调试寄存器常量 (引用自 Constants) ======
+    private const byte EC_HOTKEY_DEBUG = EcRegs.HotkeyDebug;
+    private const byte EC_HOTKEY_CTRL  = EcRegs.HotkeyCtrl;
+
+    // ====== Fn 键 EC 编码 → 动作映射 ======
+    private static readonly Dictionary<int, string> HotkeyCodeMap = HotkeyCodes.Map;
     #endregion
 
     /// <summary>
@@ -86,6 +100,7 @@ internal sealed partial class FanControlService : ServiceBase
         security.SetSecurityDescriptorSddlForm("O:BAG:SYD:(A;;GA;;;SY)(A;;GRGW;;;BA)");
 
         CooldownTimer.Elapsed += new ElapsedEventHandler(CooldownElapsed);
+        // HotkeyPollElapsed is now called from a Task loop in StartHotkeyPoller()
 
         IPCServer = new NamedPipeServer<ServiceCommand, ServiceResponse>("MSIFlux-Server", security);
         IPCServer.ClientConnected += new EventHandler<PipeConnectionEventArgs<ServiceCommand, ServiceResponse>>(IPCClientConnect);
@@ -155,6 +170,15 @@ internal sealed partial class FanControlService : ServiceBase
             {
                 ApplyConf();
             }
+
+            // 启动 EC 热键调试模式 + 400ms 轮询 EC[0xC0] (检测 Fn+F7 等硬件热键)
+            StartHotkeyPoller();
+
+            // 启动 WMI 热键事件监听 (root\WMI, 仿 BabaConsole StartMsiHotkeyWatchers)
+            StartWmiHotkeyWatcher();
+
+            // 启动 EC 硬件性能模式同步定时器 (500ms 轮询 EC 210 寄存器, 兜底检测)
+            StartEcSyncTimer();
         }
         catch (Exception ex)
         {
@@ -191,6 +215,11 @@ internal sealed partial class FanControlService : ServiceBase
 
         Log.Info(Strings.GetString("svcStopping"));
 
+        // Stop Fn hotkey poller, WMI watcher, and EC state sync timer
+        StopHotkeyPoller();
+        StopWmiHotkeyWatcher();
+        StopEcSyncTimer();
+
         // Stop the IPC server:
         Log.Info("Stopping IPC server...");
         IPCServer.Stop();
@@ -216,6 +245,8 @@ internal sealed partial class FanControlService : ServiceBase
                     // Re-apply the fan profiles after waking up from sleep:
                     Log.Info(Strings.GetString("svcWake"));
                     ApplyConf();
+                    // 恢复后确保 EC 热键调试模式处于关闭状态
+                    EnsureHotkeyDebugDisabled();
                     CooldownTimer.Start();
                 }
                 break;
@@ -242,10 +273,6 @@ internal sealed partial class FanControlService : ServiceBase
 
     private void IPCClientMessage(object sender, PipeMessageEventArgs<ServiceCommand, ServiceResponse> e)
     {
-        bool parseSuccess = false,
-            cmdSuccess = false,
-            sendSuccessMsg = true;
-
         Command cmd = e.Message.Command;
         object[] args = e.Message.Arguments;
         int id = e.Connection.ID;
@@ -256,317 +283,233 @@ internal sealed partial class FanControlService : ServiceBase
                 Log.Warn("Empty command received!");
                 return;
             case Command.GetServiceVer:
-                IPCServer.PushMessage(new ServiceResponse(
-                    Response.ServiceVer, Utils.GetRevision()), id);
+                IPCServer.PushMessage(new ServiceResponse(Response.ServiceVer, Utils.GetRevision()), id);
                 return;
-            case Command.GetFirmVer:
-            {
-                parseSuccess = true;
-                sendSuccessMsg = false;
-                cmdSuccess = GetFirmVer(id);
-                break;
-            }
-            case Command.ReadECByte:
-            {
-                if (args.Length == 1 && args[0] is byte reg)
-                {
-                    parseSuccess = true;
-                    sendSuccessMsg = false;
-                    cmdSuccess = LogECReadByte(reg, out byte value);
-                    if (cmdSuccess)
-                    {
-                        IPCServer.PushMessage(new ServiceResponse(
-                            Response.ReadResult, reg, value), id);
-                    }
-                }
-                break;
-            }
-            case Command.WriteECByte:
-            {
-                if (args.Length == 2 && args[0] is byte reg && args[1] is byte value)
-                {
-                    parseSuccess = true;
-                    cmdSuccess = LogECWriteByte(reg, value);
-                }
-                break;
-            }
-            case Command.ApplyConf:
-            {
-                parseSuccess = true;
-                bool loaded = LoadConf();
-                if (loaded)
-                {
-                    // Respond immediately, then apply EC writes in background.
-                    sendSuccessMsg = false;
-                    IPCServer.PushMessage(new ServiceResponse(
-                        Response.Success, (int)cmd), id);
-                    _ = Task.Run(() =>
-                    {
-                        try
-                        {
-                            bool ok = ApplyConf();
-                            if (!ok)
-                                Log.Warn("ApplyConf failed");
-                        }
-                        catch (Exception ex)
-                        {
-                            Log.Error($"ApplyConf exception: {ex.Message}");
-                        }
-                    });
-                    cmdSuccess = true;
-                }
-                else
-                {
-                    cmdSuccess = false;
-                }
-                break;
-            }
-            case Command.SetFullBlast:
-            {
-                if (args.Length == 1 && args[0] is int enable)
-                {
-                    parseSuccess = true;
-                    cmdSuccess = SetFullBlast(enable);
-                }
-                break;
-            }
-            case Command.GetFanSpeed:
-            {
-                if (args.Length == 1 && args[0] is int fan)
-                {
-                    parseSuccess = true;
-                    sendSuccessMsg = false;
-                    cmdSuccess = GetFanSpeed(id, fan);
-                }
-                break;
-            }
-            case Command.GetFanRPM:
-            {
-                if (args.Length == 1 && args[0] is int fan)
-                {
-                    parseSuccess = true;
-                    sendSuccessMsg = false;
-                    cmdSuccess = GetFanRPM(id, fan);
-                }
-                break;
-            }
-            case Command.GetTemp:
-            {
-                if (args.Length == 1 && args[0] is int fan)
-                {
-                    parseSuccess = true;
-                    sendSuccessMsg = false;
-                    cmdSuccess = GetTemp(id, fan);
-                }
-                break;
-            }
-            case Command.GetKeyLightBright:
-                parseSuccess = true;
-                sendSuccessMsg = false;
-                cmdSuccess = GetKeyLight(id);
-                break;
-            case Command.SetKeyLightBright:
-            {
-                if (args.Length == 1 && args[0] is byte brightness)
-                {
-                    parseSuccess = true;
-                    cmdSuccess = SetKeyLight(brightness);
-                }
-                break;
-            }
-            case Command.SetWinFnSwap:
-            {
-                if (args.Length == 1 && args[0] is int enable)
-                {
-                    parseSuccess = true;
-                    KeySwapConf cfg = Config.KeySwapConf;
-                    if (enable == -1)
-                    {
-                        cfg.Enabled = !cfg.Enabled;
-                    }
-                    else if (enable == 0)
-                    {
-                        cfg.Enabled = false;
-                    }
-                    else if (enable == 1)
-                    {
-                        cfg.Enabled = true;
-                    }
-                    else
-                    {
-                        parseSuccess = false;
-                    }
-                    if (parseSuccess)
-                    {
-                        cmdSuccess = SetWinFnSwap(cfg);
-                    }
-                }
-                break;
-            }
-            case Command.SetFanProf:
-            {
-                if (args.Length == 1 && args[0] is int fanProf)
-                {
-                    parseSuccess = true;
-                    foreach (FanConf cfg in Config.FanConfs)
-                    {
-                        // Bug #9 fix: 空曲线集直接跳过, 避免 -1 下标以及写入无效 CurveSel
-                        int count = cfg.FanCurveConfs?.Count ?? 0;
-                        if (count == 0) continue;
-
-                        if (fanProf < 0)
-                        {
-                            // 循环切换: 已在最后一个 → 回到 0, 否则 ++
-                            cfg.CurveSel = cfg.CurveSel >= count - 1 ? 0 : cfg.CurveSel + 1;
-                        }
-                        else
-                        {
-                            // 指定值: clamp 到 [0, count-1]
-                            cfg.CurveSel = Math.Max(0, Math.Min(fanProf, count - 1));
-                        }
-                    }
-
-                    // Respond immediately, then apply EC writes in background
-                    // (same rationale as SetPerfMode).
-                    sendSuccessMsg = false;
-                    IPCServer.PushMessage(new ServiceResponse(
-                        Response.Success, (int)cmd), id);
-                    _ = Task.Run(() =>
-                    {
-                        try
-                        {
-                            bool ok = ApplyConf();
-                            if (!ok)
-                                Log.Warn("SetFanProf ApplyConf failed");
-                        }
-                        catch (Exception ex)
-                        {
-                            Log.Error($"SetFanProf ApplyConf exception: {ex.Message}");
-                        }
-                    });
-                    cmdSuccess = true;
-                }
-                break;
-            }
-            case Command.SetPerfMode:
-            {
-                if (args.Length == 1 && args[0] is int perfMode)
-                {
-                    parseSuccess = true;
-                    if (Config.PerfModeConf is not null)
-                    {
-                        PerfModeConf cfg = Config.PerfModeConf;
-                        // Bug #9 fix: PerfModes.Count == 0 时 Count-1=-1, 旧逻辑会设 ModeSel=0 倒致后续 ApplyConf 越界
-                        int count = cfg.PerfModes?.Count ?? 0;
-                        if (count == 0)
-                        {
-                            cmdSuccess = false;
-                            break;
-                        }
-
-                        if (perfMode < 0)
-                        {
-                            cfg.ModeSel = cfg.ModeSel >= count - 1 ? 0 : cfg.ModeSel + 1;
-                        }
-                        else
-                        {
-                            cfg.ModeSel = Math.Max(0, Math.Min(perfMode, count - 1));
-                        }
-
-                        // Respond immediately so the GUI doesn't time out, then
-                        // apply EC writes in the background.  ApplyConf() does
-                        // dozens of sequential EC writes that can take several
-                        // seconds; running it on the pipe read thread blocks all
-                        // IPC until it finishes.
-                        sendSuccessMsg = false;
-                        IPCServer.PushMessage(new ServiceResponse(
-                            Response.Success, (int)cmd), id);
-                        int capturedMode = perfMode;
-                        PerfModeConf capturedCfg = cfg;
-                        _ = Task.Run(() =>
-                        {
-                            try
-                            {
-                                bool ok = ApplyConf();
-                                if (!ok)
-                                    Log.Warn($"SetPerfMode ApplyConf failed (mode={capturedMode})");
-                            }
-                            catch (Exception ex)
-                            {
-                                Log.Error($"SetPerfMode ApplyConf exception: {ex.Message}");
-                            }
-                        });
-                        cmdSuccess = true;
-                    }
-                }
-                break;
-            }
-            case Command.SetGpuMode:
-            {
-                if (args.Length == 1 && args[0] is int gpuMode && (gpuMode >= 0 && gpuMode <= 2))
-                {
-                    parseSuccess = true;
-                    // 0=Hybrid, 1=Discrete, 2=Eco/iGPU
-                    var gpuTask = Task.Run(() => SetGpuMode(gpuMode));
-                    if (gpuTask.Wait(TimeSpan.FromSeconds(120)))
-                    {
-                        cmdSuccess = gpuTask.Result;
-                    }
-                    else
-                    {
-                        Log.Error("SetGpuMode timed out after 120s");
-                        cmdSuccess = false;
-                    }
-                }
-                break;
-            }
-            case Command.GetGpuMode:
-            {
-                parseSuccess = true;
-                sendSuccessMsg = false;
-                int mode = GetGpuMode();
-                Log.Debug($"IPC GetGpuMode result: {mode}");
-                if (mode >= 0)
-                {
-                    IPCServer.PushMessage(new ServiceResponse(
-                        Response.GpuModeResult, mode), id);
-                    cmdSuccess = true;
-                }
-                break;
-            }
-
-            case Command.ReportGpuMode:
-            {
-                if (args.Length == 1 && args[0] is int gpuMode && gpuMode is >= 0 and <= 2)
-                {
-                    parseSuccess = true;
-                    SetCachedGpuMode(gpuMode);
-                    cmdSuccess = true;
-                }
-                break;
-            }
-
-            default:    // Unknown command
+            case Command.GetFirmVer:            HandleGetFirmVer(id); break;
+            case Command.ReadECByte:            HandleReadECByte(id, args); break;
+            case Command.WriteECByte:           HandleWriteECByte(id, args); break;
+            case Command.ApplyConf:             HandleApplyConf(id); break;
+            case Command.SetFullBlast:          HandleSetFullBlast(id, args); break;
+            case Command.GetFanSpeed:           HandleGetFanSpeed(id, args); break;
+            case Command.GetFanRPM:             HandleGetFanRPM(id, args); break;
+            case Command.GetTemp:               HandleGetTemp(id, args); break;
+            case Command.GetKeyLightBright:      HandleGetKeyLightBright(id); break;
+            case Command.SetKeyLightBright:      HandleSetKeyLightBright(id, args); break;
+            case Command.SetWinFnSwap:          HandleSetWinFnSwap(id, args); break;
+            case Command.SetFanProf:            HandleSetFanProf(id, args); break;
+            case Command.SetPerfMode:           HandleSetPerfMode(id, args); break;
+            case Command.SetGpuMode:            HandleSetGpuMode(id, args); break;
+            case Command.GetGpuMode:            HandleGetGpuMode(id); break;
+            case Command.ReportGpuMode:         HandleReportGpuMode(id, args); break;
+            case Command.ToggleMuteLed:
+            case Command.ToggleMicLed:          HandleToggleLed(id, cmd); break;
+            default:
                 Log.Error(Strings.GetString("errBadCmd", cmd));
+                IPCServer.PushMessage(new ServiceResponse(Response.Error, (int)cmd), id);
                 break;
-        }
-
-        if (!cmdSuccess)
-        {
-            if (!parseSuccess)
-            {
-                Log.Error(Strings.GetString("errBadArgs", cmd, args));
-            }
-            IPCServer.PushMessage(new ServiceResponse(
-                Response.Error, (int)cmd), id);
-        }
-        else if (sendSuccessMsg)
-        {
-            IPCServer.PushMessage(new ServiceResponse(
-                Response.Success, (int)cmd), id);
         }
     }
     #endregion
+
+    // ====== IPC 命令处理方法 (从 IPCClientMessage switch 提取) ======
+
+    private void HandleGetFirmVer(int id) { GetFirmVer(id); }
+
+    private void HandleReadECByte(int id, object[] args)
+    {
+        if (args.Length != 1 || args[0] is not byte reg)
+        { SendBadArgs(Command.ReadECByte, args, id); return; }
+        if (LogECReadByte(reg, out byte value))
+            IPCServer.PushMessage(new ServiceResponse(Response.ReadResult, reg, value), id);
+        else
+            IPCServer.PushMessage(new ServiceResponse(Response.Error, (int)Command.ReadECByte), id);
+    }
+
+    private void HandleWriteECByte(int id, object[] args)
+    {
+        if (args.Length != 2 || args[0] is not byte || args[1] is not byte)
+        { SendBadArgs(Command.WriteECByte, args, id); return; }
+        if (LogECWriteByte((byte)args[0], (byte)args[1]))
+            IPCServer.PushMessage(new ServiceResponse(Response.Success, (int)Command.WriteECByte), id);
+        else
+            IPCServer.PushMessage(new ServiceResponse(Response.Error, (int)Command.WriteECByte), id);
+    }
+
+    private void HandleApplyConf(int id)
+    {
+        bool loaded = LoadConf();
+        if (!loaded) { SendError(Command.ApplyConf, id); return; }
+        IPCServer.PushMessage(new ServiceResponse(Response.Success, (int)Command.ApplyConf), id);
+        _ = Task.Run(() =>
+        {
+            try { if (!ApplyConf()) Log.Warn("ApplyConf failed"); }
+            catch (Exception ex) { Log.Error($"ApplyConf exception: {ex.Message}"); }
+        });
+    }
+
+    private void HandleSetFullBlast(int id, object[] args)
+    {
+        if (args.Length != 1 || args[0] is not int enable)
+        { SendBadArgs(Command.SetFullBlast, args, id); return; }
+        if (SetFullBlast(enable))
+            IPCServer.PushMessage(new ServiceResponse(Response.Success, (int)Command.SetFullBlast), id);
+        else
+            IPCServer.PushMessage(new ServiceResponse(Response.Error, (int)Command.SetFullBlast), id);
+    }
+
+    private void HandleGetFanSpeed(int id, object[] args)
+    {
+        if (args.Length != 1 || args[0] is not int fan)
+        { SendBadArgs(Command.GetFanSpeed, args, id); return; }
+        if (!GetFanSpeed(id, fan))
+            IPCServer.PushMessage(new ServiceResponse(Response.Error, (int)Command.GetFanSpeed), id);
+    }
+
+    private void HandleGetFanRPM(int id, object[] args)
+    {
+        if (args.Length != 1 || args[0] is not int fan)
+        { SendBadArgs(Command.GetFanRPM, args, id); return; }
+        if (!GetFanRPM(id, fan))
+            IPCServer.PushMessage(new ServiceResponse(Response.Error, (int)Command.GetFanRPM), id);
+    }
+
+    private void HandleGetTemp(int id, object[] args)
+    {
+        if (args.Length != 1 || args[0] is not int fan)
+        { SendBadArgs(Command.GetTemp, args, id); return; }
+        if (!GetTemp(id, fan))
+            IPCServer.PushMessage(new ServiceResponse(Response.Error, (int)Command.GetTemp), id);
+    }
+
+    private void HandleGetKeyLightBright(int id) { GetKeyLight(id); }
+
+    private void HandleSetKeyLightBright(int id, object[] args)
+    {
+        if (args.Length != 1 || args[0] is not byte brightness)
+        { SendBadArgs(Command.SetKeyLightBright, args, id); return; }
+        if (SetKeyLight(brightness))
+            IPCServer.PushMessage(new ServiceResponse(Response.Success, (int)Command.SetKeyLightBright), id);
+        else
+            IPCServer.PushMessage(new ServiceResponse(Response.Error, (int)Command.SetKeyLightBright), id);
+    }
+
+    private void HandleSetWinFnSwap(int id, object[] args)
+    {
+        if (args.Length != 1 || args[0] is not int enable)
+        { SendBadArgs(Command.SetWinFnSwap, args, id); return; }
+        if (Config.KeySwapConf is null) { SendError(Command.SetWinFnSwap, id); return; }
+        var cfg = Config.KeySwapConf;
+        switch (enable)
+        {
+            case -1: cfg.Enabled = !cfg.Enabled; break;
+            case 0:  cfg.Enabled = false; break;
+            case 1:  cfg.Enabled = true; break;
+            default: SendBadArgs(Command.SetWinFnSwap, args, id); return;
+        }
+        if (SetWinFnSwap(cfg))
+            IPCServer.PushMessage(new ServiceResponse(Response.Success, (int)Command.SetWinFnSwap), id);
+        else
+            IPCServer.PushMessage(new ServiceResponse(Response.Error, (int)Command.SetWinFnSwap), id);
+    }
+
+    private void HandleSetFanProf(int id, object[] args)
+    {
+        if (args.Length != 1 || args[0] is not int fanProf)
+        { SendBadArgs(Command.SetFanProf, args, id); return; }
+        foreach (FanConf cfg in Config.FanConfs)
+        {
+            int count = cfg.FanCurveConfs?.Count ?? 0;
+            if (count == 0) continue;
+            cfg.CurveSel = fanProf < 0
+                ? (cfg.CurveSel >= count - 1 ? 0 : cfg.CurveSel + 1)
+                : Math.Max(0, Math.Min(fanProf, count - 1));
+        }
+        IPCServer.PushMessage(new ServiceResponse(Response.Success, (int)Command.SetFanProf), id);
+        _ = Task.Run(() =>
+        {
+            try { if (!ApplyConf()) Log.Warn("SetFanProf ApplyConf failed"); }
+            catch (Exception ex) { Log.Error($"SetFanProf ApplyConf exception: {ex.Message}"); }
+        });
+    }
+
+    private void HandleSetPerfMode(int id, object[] args)
+    {
+        if (args.Length != 1 || args[0] is not int perfMode)
+        { SendBadArgs(Command.SetPerfMode, args, id); return; }
+        if (Config.PerfModeConf is null) { SendError(Command.SetPerfMode, id); return; }
+        var cfg = Config.PerfModeConf;
+        int count = cfg.PerfModes?.Count ?? 0;
+        if (count == 0) { SendError(Command.SetPerfMode, id); return; }
+
+        _lastEcWriteTime = DateTime.UtcNow;
+        cfg.ModeSel = perfMode < 0
+            ? (cfg.ModeSel >= count - 1 ? 0 : cfg.ModeSel + 1)
+            : Math.Max(0, Math.Min(perfMode, count - 1));
+
+        IPCServer.PushMessage(new ServiceResponse(Response.Success, (int)Command.SetPerfMode), id);
+        try { Config.Save(Paths.CurrentConf); }
+        catch (Exception ex) { Log.Warn($"SetPerfMode save config failed: {ex.Message}"); }
+
+        _ = Task.Run(() =>
+        {
+            try { if (!ApplyConf()) Log.Warn($"SetPerfMode ApplyConf failed (mode={perfMode})"); }
+            catch (Exception ex) { Log.Error($"SetPerfMode ApplyConf exception: {ex.Message}"); }
+        });
+    }
+
+    private void HandleSetGpuMode(int id, object[] args)
+    {
+        if (args.Length != 1 || args[0] is not int gpuMode || gpuMode < 0 || gpuMode > 2)
+        { SendBadArgs(Command.SetGpuMode, args, id); return; }
+        var gpuTask = Task.Run(() => SetGpuMode(gpuMode));
+        if (gpuTask.Wait(TimeSpan.FromSeconds(120)))
+        {
+            if (!gpuTask.Result)
+                IPCServer.PushMessage(new ServiceResponse(Response.Error, (int)Command.SetGpuMode), id);
+            else
+                IPCServer.PushMessage(new ServiceResponse(Response.Success, (int)Command.SetGpuMode), id);
+        }
+        else
+        {
+            Log.Error("SetGpuMode timed out after 120s");
+            IPCServer.PushMessage(new ServiceResponse(Response.Error, (int)Command.SetGpuMode), id);
+        }
+    }
+
+    private void HandleGetGpuMode(int id)
+    {
+        int mode = GetGpuMode();
+        Log.Debug($"IPC GetGpuMode result: {mode}");
+        if (mode >= 0)
+            IPCServer.PushMessage(new ServiceResponse(Response.GpuModeResult, mode), id);
+        else
+            SendError(Command.GetGpuMode, id);
+    }
+
+    private void HandleReportGpuMode(int id, object[] args)
+    {
+        if (args.Length != 1 || args[0] is not int gpuMode || gpuMode < 0 || gpuMode > 2)
+        { SendBadArgs(Command.ReportGpuMode, args, id); return; }
+        SetCachedGpuMode(gpuMode);
+        IPCServer.PushMessage(new ServiceResponse(Response.Success, (int)Command.ReportGpuMode), id);
+    }
+
+    private void HandleToggleLed(int id, Command cmd)
+    {
+        bool isMute = cmd == Command.ToggleMuteLed;
+        IPCServer.PushMessage(new ServiceResponse(Response.Success, (int)cmd), id);
+        _ = Task.Run(() => { try { WmiToggleLed(isMute); } catch { } });
+    }
+
+    private void SendBadArgs(Command cmd, object[] args, int? clientId = null)
+    {
+        Log.Error(Strings.GetString("errBadArgs", cmd, args));
+        if (clientId.HasValue)
+            IPCServer.PushMessage(new ServiceResponse(Response.Error, (int)cmd), clientId.Value);
+    }
+
+    private void SendError(Command cmd, int clientId)
+        => IPCServer.PushMessage(new ServiceResponse(Response.Error, (int)cmd), clientId);
 
     private bool LogECReadByte(byte reg, out byte value)
     {
@@ -873,7 +816,7 @@ internal sealed partial class FanControlService : ServiceBase
     /// - Invert 模式下仅当结果>0 才取倒数
     /// - 所有 NaN/Infinity 统一归零
     /// </summary>
-    private static int ComputeRpm(FanRPMConf rpmCfg, ushort rpmValue)
+    internal static int ComputeRpm(FanRPMConf rpmCfg, ushort rpmValue)
     {
         if (rpmValue == 0) return 0;
 
@@ -1162,5 +1105,425 @@ internal sealed partial class FanControlService : ServiceBase
         return i >= Config.FanConfs.Count
             ? Config.FanConfs.Count - 1
             : i > 0 ? i : 0;
+    }
+
+    // ==================================================================
+    // WMI 热键事件监听 (仿 BabaConsole StartMsiHotkeyWatchers)
+    // 监听 root\WMI 下的 MSI 热键事件类, 检测 Fn+F7 (code=118)
+    // ==================================================================
+
+    private readonly List<System.Management.ManagementEventWatcher> _wmiHotkeyWatchers = new();
+    private static readonly string[] WmiHotkeyClasses = { "WMIEvent", "MSIEvent", "MSI_ACPI" };
+
+    private void StartWmiHotkeyWatcher()
+    {
+        StopWmiHotkeyWatcher();
+        try
+        {
+            var scope = new System.Management.ManagementScope(@"\\.\root\WMI");
+            scope.Options.EnablePrivileges = true;
+            scope.Connect();
+            var added = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (string cls in WmiHotkeyClasses)
+            {
+                if (!added.Add(cls)) continue;
+                try
+                {
+                    var q = new System.Management.WqlEventQuery("SELECT * FROM " + cls);
+                    var w = new System.Management.ManagementEventWatcher(scope, q);
+                    w.EventArrived += OnWmiHotkeyEvent;
+                    w.Start();
+                    _wmiHotkeyWatchers.Add(w);
+                    Log.Info($"WMI 热键: 已监听 {cls}");
+                }
+                catch (Exception ex)
+                {
+                    Log.Debug($"WMI 热键: {cls} 监听失败 - {ex.Message}");
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Warn($"WMI 热键: 初始化失败 - {ex.Message}");
+        }
+    }
+
+    private void StopWmiHotkeyWatcher()
+    {
+        foreach (var w in _wmiHotkeyWatchers)
+        {
+            try { w.EventArrived -= OnWmiHotkeyEvent; w.Stop(); w.Dispose(); } catch { }
+        }
+        _wmiHotkeyWatchers.Clear();
+    }
+
+    private void OnWmiHotkeyEvent(object sender, System.Management.EventArrivedEventArgs e)
+    {
+        try
+        {
+            // 提取事件中的所有数值属性
+            var nums = new List<int>();
+            foreach (System.Management.PropertyData pd in e.NewEvent.Properties)
+            {
+                try
+                {
+                    if (pd.Value is int i) nums.Add(i);
+                    else if (pd.Value is uint u) nums.Add((int)u);
+                    else if (pd.Value is byte b) nums.Add(b);
+                    else if (pd.Value is short s) nums.Add(s);
+                }
+                catch { }
+            }
+
+            string cls = e.NewEvent.ClassPath?.ClassName ?? "?";
+            Log.Info($"WMI 热键事件: {cls}, 数值=[{string.Join(",", nums)}]");
+
+            // 检测 Fn+F7 (code=118)
+            if (nums.Contains(118))
+            {
+                Log.Info("WMI 热键: Fn+F7 (118) → 切换性能模式");
+                CyclePerfModeFromHotkey();
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Warn($"WMI 热键事件处理异常: {ex.Message}");
+        }
+    }
+
+    private void CyclePerfModeFromHotkey()
+    {
+        try
+        {
+            if (Config?.PerfModeConf is null) return;
+            var cfg = Config.PerfModeConf;
+            int cnt = cfg.PerfModes?.Count ?? 0;
+            if (cnt == 0) return;
+            _lastEcWriteTime = DateTime.UtcNow;
+            int oldSel = cfg.ModeSel;
+            cfg.ModeSel = cfg.ModeSel >= cnt - 1 ? 0 : cfg.ModeSel + 1;
+            try { Config.Save(Paths.CurrentConf); } catch { }
+            Log.Info($"Fn+F7: {cfg.PerfModes[oldSel].Name} → {cfg.PerfModes[cfg.ModeSel].Name}");
+            IPCServer.PushMessage(new ServiceResponse(Response.Success, (int)Command.SetPerfMode), -1);
+            _ = Task.Run(() => { try { ApplyConf(); } catch { } });
+        }
+        catch (Exception ex) { Log.Warn($"CyclePerfMode 异常: {ex.Message}"); }
+    }
+
+    // ==================================================================
+    // Fn 热键检测 — EC 调试寄存器轮询 (零依赖 FM / BabaConsole)
+    // ==================================================================
+
+    /// <summary>开启 EC 热键调试模式并启动 Task 轮询循环 (替代 Timer, 在服务中更可靠)</summary>
+    private void StartHotkeyPoller()
+    {
+        try
+        {
+            _hotkeyCts?.Cancel();
+            _hotkeyCts = new CancellationTokenSource();
+            var token = _hotkeyCts.Token;
+
+            // 验证 EC 可访问
+            if (!_EC.ReadByte(EC_HOTKEY_CTRL, out byte c1Init))
+            {
+                Log.Warn("Fn 热键: 无法读取 EC[0xC1], 轮询取消");
+                return;
+            }
+            Log.Info($"Fn 热键: EC[0xC1] 初始值 0x{c1Init:X2}, 启动 Task 轮询循环 (400ms)");
+            _lastHotkeyCode = 0;
+
+            _ = Task.Run(async () =>
+            {
+                int loopCount = 0;
+                while (!token.IsCancellationRequested)
+                {
+                    try
+                    {
+                        HotkeyPollElapsed();
+                        // 每 25 次 (10秒) 打印一次心跳, 证明轮询在运行
+                        if (++loopCount % 25 == 0)
+                            Log.Debug($"Fn 热键: 轮询心跳 #{loopCount}, EC[0xC1] 就绪");
+                    }
+                    catch (Exception ex)
+                    {
+                        Log.Warn($"Fn 热键: 轮询异常 - {ex.Message}");
+                    }
+                    await Task.Delay(400, token).ConfigureAwait(false);
+                }
+                Log.Info("Fn 热键: 轮询循环已退出");
+            }, token);
+        }
+        catch (Exception ex)
+        {
+            Log.Warn($"Fn 热键: 初始化失败 - {ex.Message}");
+        }
+    }
+
+    /// <summary>停止轮询并关闭 EC 热键调试模式</summary>
+    private void StopHotkeyPoller()
+    {
+        try
+        {
+            _hotkeyCts?.Cancel();
+            Log.Info("Fn 热键: 轮询已停止");
+        }
+        catch { }
+
+        try
+        {
+            if (_EC.ReadByte(EC_HOTKEY_CTRL, out byte c1) && (c1 & 0x80) != 0)
+            {
+                _EC.WriteByte(EC_HOTKEY_CTRL, (byte)(c1 & 0x7F));
+                Log.Info("Fn 热键: 调试模式已关闭");
+            }
+        }
+        catch { }
+    }
+
+    /// <summary>确保 EC 热键调试模式处于关闭状态 (清除 0xC1 bit7)</summary>
+    private void EnsureHotkeyDebugDisabled()
+    {
+        try
+        {
+            if (_EC.ReadByte(EC_HOTKEY_CTRL, out byte c1) && (c1 & 0x80) != 0)
+            {
+                _EC.WriteByte(EC_HOTKEY_CTRL, (byte)(c1 & 0x7F));
+                Log.Info("Fn 热键: 调试模式 0xC1 bit7 已关闭, 恢复硬件键盘正常状态");
+            }
+        }
+        catch { }
+    }
+
+    // ==================================================================
+    // EC 硬件性能模式状态同步器 (500ms 轮询 EC 210 寄存器)
+    // 零键盘钩子、零驱动调试模式、零误触 'W' 键风险。
+    // 当用户按下笔记本键盘的 Fn+F7 时，硬件 EC 会直接更新 210 寄存器。
+    // 此同步器检测到 EC[210] 变化后，自动同步 MSI Flux 的 Config 并通知 GUI。
+    // ==================================================================
+
+    private readonly System.Timers.Timer EcSyncTimer = new(500);
+    private DateTime _lastEcWriteTime = DateTime.MinValue;
+
+    private void StartEcSyncTimer()
+    {
+        EcSyncTimer.Elapsed -= OnEcSyncElapsed;
+        EcSyncTimer.Elapsed += OnEcSyncElapsed;
+        EcSyncTimer.AutoReset = true;
+        EcSyncTimer.Start();
+        Log.Info("EC 硬件状态同步定时器已启动 (500ms 轮询 EC 210 寄存器)");
+    }
+
+    private void StopEcSyncTimer()
+    {
+        EcSyncTimer.Stop();
+    }
+
+    private void OnEcSyncElapsed(object? sender, ElapsedEventArgs e)
+    {
+        try
+        {
+            // 如果最近 1.5 秒内服务刚主动写过 EC，跳过硬件同步，避免竞态
+            if ((DateTime.UtcNow - _lastEcWriteTime).TotalSeconds < 1.5) return;
+
+            if (Config?.PerfModeConf is null) return;
+            var cfg = Config.PerfModeConf;
+            if (cfg.PerfModes is null || cfg.PerfModes.Count == 0) return;
+
+            // 读取 EC 寄存器 210
+            if (_EC.ReadByte(cfg.Reg, out byte val))
+            {
+                // 查找与当前 EC 寄存器值匹配的模式索引
+                for (int i = 0; i < cfg.PerfModes.Count; i++)
+                {
+                    if (cfg.PerfModes[i].Value == val)
+                    {
+                        if (cfg.ModeSel != i)
+                        {
+                            int oldIdx = cfg.ModeSel;
+                            cfg.ModeSel = i;
+                            try { Config.Save(Paths.CurrentConf); } catch { }
+                            Log.Info($"EC 硬件同步: 检测到硬件 Fn+F7 切换性能模式 ➔ {cfg.PerfModes[i].Name} ({cfg.PerfModes[oldIdx].Name} → {cfg.PerfModes[i].Name}, EC[0x{cfg.Reg:X2}]=0x{val:X2})");
+                            IPCServer.PushMessage(new ServiceResponse(Response.Success, (int)Command.SetPerfMode), -1);
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+        catch { }
+    }
+
+    /// <summary>轮询回调: 读 EC[0xC0], 匹配编码 → 执行对应动作 (由 Task 循环调用)</summary>
+    private int _hotkeyPollCount;
+    private void HotkeyPollElapsed()
+    {
+        try
+        {
+            // 每次轮询都确保 debug 模式仍然开启 (仿 BabaConsole TryEnableMsiHotkeyDebugRegister)
+            if (!_EC.ReadByte(EC_HOTKEY_CTRL, out byte c1))
+            {
+                if (++_hotkeyPollCount % 30 == 0)
+                    Log.Warn($"Fn 热键: EC[0xC1] 读取失败 ({_hotkeyPollCount} 次)");
+                return;
+            }
+            if ((c1 & 0x80) == 0)
+            {
+                byte c1New = (byte)(c1 | 0x80);
+                _EC.WriteByte(EC_HOTKEY_CTRL, c1New);
+                Log.Info($"Fn 热键: 调试模式已恢复 (EC[0xC1]: 0x{c1:X2} → 0x{c1New:X2})");
+            }
+            // 诊断: 每 25 次打印一次 C1 和 C0 的值 (Info 级别确保可见)
+            if (_hotkeyPollCount % 25 == 0)
+                Log.Info($"Fn 热键诊断: EC[0xC1]=0x{c1:X2}, 轮询 #{_hotkeyPollCount}");
+            _hotkeyPollCount++;
+
+            if (!_EC.ReadByte(EC_HOTKEY_DEBUG, out byte code)) return;
+
+            // 非零值始终打印 (Info级别)
+            if (code != 0)
+                Log.Info($"Fn 热键: EC[0xC0]=0x{code:X2} (非零!)");
+
+            // EC 值为 0 表示无热键或已清零, 忽略
+            if (code == 0)
+            {
+                _lastHotkeyCode = 0;
+                return;
+            }
+
+            // 去重: 同一个编码只处理一次 (清零后 _lastHotkeyCode 会归零, 下次才处理新值)
+            if (code == _lastHotkeyCode) return;
+            _lastHotkeyCode = code;
+
+            // 未知编码记录以便将来添加支持
+            if (!HotkeyCodeMap.TryGetValue(code, out string? name))
+            {
+                Log.Info($"Fn 热键: 未映射编码 0x{code:X2}");
+                // 仍然清零, 避免残留值影响下次检测
+                _EC.WriteByte(EC_HOTKEY_DEBUG, 0);
+                return;
+            }
+
+            Log.Info($"Fn 热键: 0x{code:X2} → {name}");
+
+            switch (code)
+            {
+                case 118: // Fn+F7 → 场景模式: 服务端直接循环切换
+                    Log.Info($"Fn 热键: 0x{code:X2} → {name} → 执行性能模式切换");
+                    try
+                    {
+                        if (Config?.PerfModeConf is not null)
+                        {
+                            var pmCfg = Config.PerfModeConf;
+                            int cnt = pmCfg.PerfModes?.Count ?? 0;
+                            if (cnt > 0)
+                            {
+                                _lastEcWriteTime = DateTime.UtcNow;
+                                int oldSel = pmCfg.ModeSel;
+                                pmCfg.ModeSel = pmCfg.ModeSel >= cnt - 1 ? 0 : pmCfg.ModeSel + 1;
+                                try { Config.Save(Paths.CurrentConf); } catch { }
+                                Log.Info($"Fn+F7: {pmCfg.PerfModes[oldSel].Name} → {pmCfg.PerfModes[pmCfg.ModeSel].Name}");
+                                IPCServer.PushMessage(new ServiceResponse(Response.Success, (int)Command.SetPerfMode), -1);
+                                _ = Task.Run(() => { try { ApplyConf(); } catch { } });
+                            }
+                        }
+                    }
+                    catch (Exception ex) { Log.Warn($"Fn+F7 切换异常: {ex.Message}"); }
+                    break;
+
+                case 38: // Fn+↑ → Cooler Boost 切换
+                    SetFullBlast(-1);
+                    break;
+
+                case 119: // Fn+F8 → 键盘背光循环
+                    if (Config?.KeyLightConf is not null)
+                    {
+                        int curLevel = GetKeyLightLevel();
+                        int nextLevel = (curLevel + 1) % 4;
+                        byte nextVal = (byte)(Config.KeyLightConf.MinVal + nextLevel);
+                        if (LogECWriteByte(Config.KeyLightConf.Reg, nextVal))
+                            Log.Info($"Fn 热键: 键盘背光 → {nextLevel}/3");
+                    }
+                    break;
+
+                case 27: // Fn+Esc → Win/Fn 互换
+                    if (Config?.KeySwapConf is not null)
+                    {
+                        Config.KeySwapConf.Enabled = !Config.KeySwapConf.Enabled;
+                        SetWinFnSwap(Config.KeySwapConf);
+                        Log.Info($"Fn 热键: Win/Fn → {(Config.KeySwapConf.Enabled ? "已互换" : "正常")}");
+                    }
+                    break;
+            }
+
+            // 清除 EC[0xC0] 通知 BIOS 热键已被消费 (仿 BabaConsole TryClearMsiHotkeyDebugValue)
+            // 清零后 _lastHotkeyCode 保持当前值, 下次 EC[0xC0] 归零后 _lastHotkeyCode 也归零,
+            // 从而能正确检测同一热键的下次按下.
+            _EC.WriteByte(EC_HOTKEY_DEBUG, 0);
+        }
+        catch (Exception ex)
+        {
+            Log.Warn($"Fn 热键: 轮询异常 - {ex.Message}");
+        }
+    }
+
+    /// <summary>读当前键盘背光亮度级别 (0-3), 失败返回 0</summary>
+    private int GetKeyLightLevel()
+    {
+        if (Config?.KeyLightConf is null) return 0;
+        if (_EC.ReadByte(Config.KeyLightConf.Reg, out byte val)
+            && val >= Config.KeyLightConf.MinVal
+            && val <= Config.KeyLightConf.MaxVal)
+        {
+            return val - Config.KeyLightConf.MinVal;
+        }
+        return 0;
+    }
+
+    // ====== WMI ACPI LED 控制 (SYSTEM 权限) ======
+    private static readonly byte[] LedRegs = EcRegs.LedRegs;
+
+    private void WmiToggleLed(bool muteLed)
+    {
+        int moCount = 0, okCount = 0, failCount = 0;
+        try
+        {
+            using var searcher = new System.Management.ManagementObjectSearcher(
+                @"root\wmi", "SELECT * FROM MSI_ACPI");
+            foreach (System.Management.ManagementObject mo in searcher.Get())
+            {
+                moCount = 1;
+                foreach (byte reg in LedRegs)
+                {
+                    try
+                    {
+                        var rPkg = new System.Management.ManagementClass(@"root\wmi:Package_32", null).CreateInstance();
+                        var rBuf = new byte[32]; rBuf[0] = reg;
+                        rPkg["Bytes"] = rBuf;
+                        var rIn = mo.GetMethodParameters("Get_Data"); rIn["Data"] = rPkg;
+                        var rOut = mo.InvokeMethod("Get_Data", rIn, null);
+                        byte curVal = 0;
+                        if (rOut?["Data"] is System.Management.ManagementBaseObject rObj)
+                            foreach (System.Management.PropertyData pd in rObj.Properties)
+                                if (pd.IsArray && pd.Value is byte[] r && r.Length > 1) { curVal = r[1]; break; }
+                        byte bit = muteLed ? (byte)0 : (byte)1;
+                        byte next = (byte)(curVal ^ (byte)(1 << bit));
+                        var wPkg = new System.Management.ManagementClass(@"root\wmi:Package_32", null).CreateInstance();
+                        var wBuf = new byte[32]; wBuf[0] = reg; wBuf[1] = next;
+                        wPkg["Bytes"] = wBuf;
+                        var wIn = mo.GetMethodParameters("Set_Data"); wIn["Data"] = wPkg;
+                        mo.InvokeMethod("Set_Data", wIn, null);
+                        okCount++;
+                    }
+                    catch { failCount++; }
+                }
+                break;
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Error($"WMI LED exception: {ex.Message}");
+            return;
+        }
+        Log.Info($"WMI LED: {moCount} MSI_ACPI, ok={okCount} fail={failCount}, muteLed={(muteLed ? "F1" : "F5")}");
     }
 }

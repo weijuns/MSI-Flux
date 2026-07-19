@@ -184,10 +184,37 @@ public sealed class MSIFlux_Config
     public static MSIFlux_Config Load(string path)
     {
         XmlSerializer serialiser = new(typeof(MSIFlux_Config));
-        using (XmlReader reader = XmlReader.Create(path))
+
+        try
         {
-            MSIFlux_Config cfg = (MSIFlux_Config)serialiser.Deserialize(reader);
-            return cfg.IsValid() ? cfg : throw new InvalidConfigException();
+            using (XmlReader reader = XmlReader.Create(path))
+            {
+                MSIFlux_Config cfg = (MSIFlux_Config)serialiser.Deserialize(reader);
+                return cfg.IsValid() ? cfg : throw new InvalidConfigException();
+            }
+        }
+        catch (Exception ex) when (ex is not FileNotFoundException)
+        {
+            // 主配置损坏, 尝试回退到 .bak 备份
+            string backupPath = path + ".bak";
+            if (File.Exists(backupPath))
+            {
+                try
+                {
+                    using (XmlReader reader = XmlReader.Create(backupPath))
+                    {
+                        MSIFlux_Config cfg = (MSIFlux_Config)serialiser.Deserialize(reader);
+                        if (cfg.IsValid())
+                        {
+                            // 恢复备份到主文件
+                            File.Copy(backupPath, path, overwrite: true);
+                            return cfg;
+                        }
+                    }
+                }
+                catch { }
+            }
+            throw;
         }
     }
 
@@ -232,7 +259,8 @@ public sealed class MSIFlux_Config
             if (File.Exists(path))
             {
                 File.Replace(tmpPath, path, backupPath, ignoreMetadataErrors: true);
-                try { File.Delete(backupPath); } catch { }
+                // 保留 .bak 备份: 若主配置损坏, Load 可回退到此文件
+                // 不再 Delete(backupPath)
             }
             else
             {

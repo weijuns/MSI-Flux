@@ -230,6 +230,23 @@ public enum Command
     /// </para>
     /// </remarks>
     ReportGpuMode,
+    /// <summary>
+    /// Toggle the keyboard mute LED (F1 key).
+    /// The Service reads the current LED state via WMI ACPI, flips it, and writes back.
+    /// Requires WMI ACPI binding (msiapcfg.dll + MofImagePath).
+    /// </summary>
+    /// <remarks>
+    /// <para>This command expects no arguments.</para>
+    /// </remarks>
+    ToggleMuteLed,
+    /// <summary>
+    /// Toggle the keyboard microphone mute LED (F5 key).
+    /// Same mechanism as <see cref="ToggleMuteLed"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>This command expects no arguments.</para>
+    /// </remarks>
+    ToggleMicLed,
 }
 
 /// <summary>

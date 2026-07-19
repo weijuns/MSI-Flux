@@ -19,8 +19,8 @@
     <DebuggerSupport>false</DebuggerSupport>
     <EnableUnsafeBinaryFormatterSerialization>false</EnableUnsafeBinaryFormatterSerialization>
     <ApplicationIcon>..\MSIFlux\MSIFlux.ico</ApplicationIcon>
-    <AssemblyVersion>1.2.0</AssemblyVersion>
-    <InformationalVersion>1.2.0</InformationalVersion>
+    <AssemblyVersion>1.3.0</AssemblyVersion>
+    <InformationalVersion>1.3.0</InformationalVersion>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <!-- Disable WinForms - launcher uses raw P/Invoke only -->

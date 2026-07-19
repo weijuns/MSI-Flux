@@ -19,3 +19,9 @@ Desktop.ini
 ## Publish
 publish/
 publish-launcher/
+
+## Temp
+.workbuddy/
+FnKeyDiag/
+*.bat
+

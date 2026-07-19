@@ -58,18 +58,35 @@ static class Launcher
 
     private static void ExtractAndRun()
     {
-        // 清理旧的临时目录 (每次启动都会创建一个, 不清理会越积越多)
-        CleanupOldTempDirs();
+        // 使用固定目录而非随机临时目录, 确保 Windows 服务的 binPath 在每次运行时一致.
+        // 路径: %LocalAppData%\MSI Flux\app\
+        string appDir = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "MSI Flux", "app");
+        Directory.CreateDirectory(appDir);
 
-        string tempDir = Path.Combine(Path.GetTempPath(), "MSI_Flux_" + Guid.NewGuid().ToString("N")[..8]);
-        Directory.CreateDirectory(tempDir);
+        string exePath = Path.Combine(appDir, "MSI Flux.exe");
 
-        string exePath = Path.Combine(tempDir, "MSI Flux.exe");
+        // 版本检测: 比较内嵌资源与磁盘文件的修改时间/大小, 仅在版本变更时覆盖
+        bool needExtract = true;
+        try
+        {
+            using var resStream = Assembly.GetExecutingAssembly().GetManifestResourceStream("MSI_Flux.exe");
+            if (resStream is not null && File.Exists(exePath))
+            {
+                var fileInfo = new FileInfo(exePath);
+                // 内嵌资源大小与磁盘文件一致则跳过提取
+                if (fileInfo.Length == resStream.Length)
+                    needExtract = false;
+            }
+        }
+        catch { }
 
         try
         {
-            using (var stream = Assembly.GetExecutingAssembly().GetManifestResourceStream("MSI_Flux.exe"))
+            if (needExtract)
             {
+                using var stream = Assembly.GetExecutingAssembly().GetManifestResourceStream("MSI_Flux.exe");
                 if (stream is null)
                 {
                     MessageBoxW(IntPtr.Zero, "Internal error: embedded resource not found.", "MSI Flux", MB_OK);
@@ -82,7 +99,7 @@ static class Launcher
             var psi = new ProcessStartInfo(exePath)
             {
                 UseShellExecute = true,
-                WorkingDirectory = tempDir
+                WorkingDirectory = appDir
             };
             Process.Start(psi);
         }
@@ -90,19 +107,5 @@ static class Launcher
         {
             MessageBoxW(IntPtr.Zero, $"Failed to launch MSI Flux:\n{ex.Message}", "MSI Flux", MB_OK);
         }
-    }
-
-    private static void CleanupOldTempDirs()
-    {
-        try
-        {
-            string tempRoot = Path.GetTempPath();
-            foreach (var dir in Directory.GetDirectories(tempRoot, "MSI_Flux_*"))
-            {
-                try { Directory.Delete(dir, recursive: true); }
-                catch { /* 正在使用, 跳过 */ }
-            }
-        }
-        catch { }
     }
 }

@@ -171,6 +171,13 @@ namespace MSIFlux.GUI
             if (Program.FanRunner != null)
             {
                 Program.FanRunner.TempUpdated += FanRunner_TempUpdated;
+                Program.FanRunner.ConfigChanged += (_, _) =>
+                {
+                    if (InvokeRequired)
+                        BeginInvoke(() => RefreshPerfModeFromConfig());
+                    else
+                        RefreshPerfModeFromConfig();
+                };
             }
         }
 
@@ -199,14 +206,8 @@ namespace MSIFlux.GUI
         
         private void SystemEvents_PowerModeChanged(object sender, PowerModeChangedEventArgs e)
         {
-            if (e.Mode == PowerModes.StatusChange)
-            {
-                HandleAutoEcoOnBattery();
-                if (_isAutoMode)
-                {
-                    ApplyAutoScreenRefreshRate();
-                }
-            }
+            // 禁用 StatusChange 自动切模式——睡眠唤醒时电源状态抖动导致误触发
+            // HandleAutoEcoOnBattery() 和 ApplyAutoScreenRefreshRate() 暂时关闭
         }
 
         private void HandleAutoEcoOnBattery()
@@ -317,13 +318,7 @@ namespace MSIFlux.GUI
         private bool _isAutoMode = false;
         private int _manualRefreshRate = 60;
         
-        private Dictionary<int, int> _perfModeCPUBoostMap = new Dictionary<int, int>
-        {
-            { 0, 0 },
-            { 1, 2 },
-            { 2, 2 },
-            { 3, 2 }
-        };
+        private Dictionary<int, int> _perfModeCPUBoostMap = new(MSIFlux.Common.Defaults.PerfModeCpuBoost);
 
         private void InitScreen()
         {
@@ -1241,5 +1236,12 @@ namespace MSIFlux.GUI
                 fansForm.Show();
             }
         }
+
+        private void RefreshPerfModeFromConfig()
+        {
+            var config = Program.FanRunner?.GetConfig();
+            if (config?.PerfModeConf != null)
+                VisualisePerfMode(config.PerfModeConf.ModeSel);
+        }
     }
-}
+    }

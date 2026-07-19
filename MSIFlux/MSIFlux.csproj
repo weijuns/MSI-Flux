@@ -12,8 +12,8 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <PlatformTarget>AnyCPU</PlatformTarget>
     <AllowUnsafeBlocks>True</AllowUnsafeBlocks>
-    <AssemblyVersion>1.2.0</AssemblyVersion>
-    <InformationalVersion>1.2.0</InformationalVersion>
+    <AssemblyVersion>1.3.0</AssemblyVersion>
+    <InformationalVersion>1.3.0</InformationalVersion>
     <RootNamespace>MSIFlux.GUI</RootNamespace>
     
     <!-- 框架依赖单文件发布 (参考 g-helper):
@@ -34,6 +34,19 @@
        而框架依赖场景体积收益是核心目标. -->
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|AnyCPU'">
     <PublishReadyToRun>false</PublishReadyToRun>
+  </PropertyGroup>
+
+  <!-- 自包含发布 Profile (替代 Launcher 方案)
+       用法: dotnet publish MSIFlux\MSIFlux.csproj -c Release -p:SelfContained=true
+       产出单一 win-x64 exe, 无需用户安装 .NET 运行时. -->
+  <PropertyGroup Condition="'$(SelfContained)'=='true'">
+    <PublishSingleFile>true</PublishSingleFile>
+    <SelfContained>true</SelfContained>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <PublishTrimmed>false</PublishTrimmed>
+    <DebugType>embedded</DebugType>
+    <DebugSymbols>true</DebugSymbols>
   </PropertyGroup>
 
   <ItemGroup>

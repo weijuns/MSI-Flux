@@ -147,6 +147,14 @@ internal sealed class ServiceIpcProxy : IDisposable
     public bool ReportGpuMode(int mode, TimeSpan? timeout = null)
         => SendAndWaitForAck(Command.ReportGpuMode, timeout, mode);
 
+    /// <summary>翻转键盘静音 LED (F1 按键灯).</summary>
+    public void ToggleMuteLed(TimeSpan? timeout = null)
+        => SendAndWaitForAck(Command.ToggleMuteLed, timeout);
+
+    /// <summary>翻转键盘麦克风静音 LED (F5 按键灯).</summary>
+    public void ToggleMicLed(TimeSpan? timeout = null)
+        => SendAndWaitForAck(Command.ToggleMicLed, timeout);
+
     /// <summary>读取指定风扇对应传感器的温度 (°C). 失败返回 -1.</summary>
     public int GetTemp(int fanIndex, TimeSpan? timeout = null)
     {

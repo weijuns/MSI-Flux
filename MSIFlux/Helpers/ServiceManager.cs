@@ -148,6 +148,9 @@ internal static class ServiceManager
             return false;
         }
 
+        // 清理旧版 YAMDCC 残留服务 (SERVICE_NAME 含空格, 与新名 MSIFluxService 冲突)
+        TryRemoveLegacyService();
+
         string exe = GetExecutablePath();
         string binPath = $"\"{exe}\" --service";
 
@@ -167,6 +170,34 @@ internal static class ServiceManager
         RunSc($"failure {ServiceName} reset= 86400 actions= restart/60000/restart/60000/restart/120000");
 
         return true;
+    }
+
+    /// <summary>
+    /// 清理旧版 YAMDCC 残留服务 (SERVICE_NAME = "MSI Flux Service", 含空格).
+    /// 该旧服务名与 Install() 的 DisplayName 冲突 (错误 1078), 导致新装失败.
+    /// </summary>
+    private static void TryRemoveLegacyService()
+    {
+        const string legacyName = "MSI Flux Service";
+        try
+        {
+            using var sc = new ServiceController(legacyName);
+            if (sc.Status == ServiceControllerStatus.Running)
+            {
+                sc.Stop();
+                sc.WaitForStatus(ServiceControllerStatus.Stopped, TimeSpan.FromSeconds(10));
+            }
+            RunSc($"delete {legacyName}");
+            Debug.WriteLine($"[ServiceManager] 已清理旧版服务: {legacyName}");
+        }
+        catch (InvalidOperationException)
+        {
+            // 服务不存在, 无需清理
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"[ServiceManager] 清理旧版服务异常: {ex.Message}");
+        }
     }
 
     /// <summary>停止并卸载服务.</summary>
@@ -295,7 +326,13 @@ internal static class ServiceManager
             };
             using var proc = Process.Start(psi);
             if (proc == null) return -1;
+            string stdout = proc.StandardOutput.ReadToEnd();
+            string stderr = proc.StandardError.ReadToEnd();
             proc.WaitForExit(10000);
+            if (proc.ExitCode != 0)
+            {
+                Debug.WriteLine($"[ServiceManager] sc.exe {arguments}\n  stdout: {stdout.Trim()}\n  stderr: {stderr.Trim()}\n  exit: {proc.ExitCode}");
+            }
             return proc.ExitCode;
         }
         catch (Exception ex)
