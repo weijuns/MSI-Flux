@@ -97,6 +97,12 @@ public sealed class CommonConfig
     [XmlElement]
     public bool AutoEcoOnBattery { get; set; }
 
+    [XmlElement]
+    public bool Enable05msTimer { get; set; }
+
+    [XmlElement]
+    public bool EnableUsbPowerShare { get; set; }
+
     /// <summary>
     /// The performance mode index that was active before switching to
     /// Eco mode due to battery power. Used to restore the mode when
@@ -198,6 +204,22 @@ public sealed class CommonConfig
     {
         CommonConfig cfg = Load();
         cfg.AutoEcoOnBattery = val;
+        cfg.Save();
+    }
+
+    public static bool GetEnable05msTimer() => Load().Enable05msTimer;
+    public static void SetEnable05msTimer(bool val)
+    {
+        var cfg = Load();
+        cfg.Enable05msTimer = val;
+        cfg.Save();
+    }
+
+    public static bool GetEnableUsbPowerShare() => Load().EnableUsbPowerShare;
+    public static void SetEnableUsbPowerShare(bool val)
+    {
+        var cfg = Load();
+        cfg.EnableUsbPowerShare = val;
         cfg.Save();
     }
 

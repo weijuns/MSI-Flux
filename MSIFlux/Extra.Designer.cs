@@ -63,7 +63,7 @@ namespace MSIFlux.GUI
             // ===== 通用设置卡片 =====
             this.cardGeneral = new ModernCard();
             this.cardGeneral.Location = new Point(16, 52);
-            this.cardGeneral.Size = new Size(348, 110);
+            this.cardGeneral.Size = new Size(348, 154);
             this.Controls.Add(this.cardGeneral);
 
             this.labelGeneralTitle = new Label();
@@ -99,9 +99,33 @@ namespace MSIFlux.GUI
             this.checkAutoEcoOnBattery.UseVisualStyleBackColor = true;
             this.cardGeneral.Controls.Add(this.checkAutoEcoOnBattery);
 
+            // 高精度定时器 (0.5ms)
+            this.check05msTimer = new CheckBox();
+            this.check05msTimer.AutoSize = true;
+            this.check05msTimer.Font = new Font("Segoe UI", 9F);
+            this.check05msTimer.ForeColor = Color.FromArgb(55, 65, 81);
+            this.check05msTimer.Location = new Point(14, 74);
+            this.check05msTimer.Size = new Size(320, 22);
+            this.check05msTimer.TabIndex = 3;
+            this.check05msTimer.Text = "高精度定时器 (0.5ms 降低游戏延迟)";
+            this.check05msTimer.UseVisualStyleBackColor = true;
+            this.cardGeneral.Controls.Add(this.check05msTimer);
+
+            // USB 关机充电
+            this.checkUsbPowerShare = new CheckBox();
+            this.checkUsbPowerShare.AutoSize = true;
+            this.checkUsbPowerShare.Font = new Font("Segoe UI", 9F);
+            this.checkUsbPowerShare.ForeColor = Color.FromArgb(55, 65, 81);
+            this.checkUsbPowerShare.Location = new Point(14, 96);
+            this.checkUsbPowerShare.Size = new Size(320, 22);
+            this.checkUsbPowerShare.TabIndex = 4;
+            this.checkUsbPowerShare.Text = "USB 关机/睡眠充电";
+            this.checkUsbPowerShare.UseVisualStyleBackColor = true;
+            this.cardGeneral.Controls.Add(this.checkUsbPowerShare);
+
             // 语言选择行（独立框）
             this.panelLangBox = new Panel();
-            this.panelLangBox.Location = new Point(14, 74);
+            this.panelLangBox.Location = new Point(14, 118);
             this.panelLangBox.Size = new Size(320, 32);
             this.panelLangBox.BackColor = Color.FromArgb(227, 227, 227);
             this.panelLangBox.Padding = new Padding(6, 4, 6, 0);
@@ -128,7 +152,7 @@ namespace MSIFlux.GUI
 
             // ===== MSI Service 管理卡片 =====
             this.cardMSI = new ModernCard();
-            this.cardMSI.Location = new Point(16, 170);
+            this.cardMSI.Location = new Point(16, 214);
             this.cardMSI.Size = new Size(348, 110);
             this.Controls.Add(this.cardMSI);
 
@@ -185,7 +209,7 @@ namespace MSIFlux.GUI
 
             // ===== Fan Control 管理卡片 =====
             this.cardService = new ModernCard();
-            this.cardService.Location = new Point(16, 290);
+            this.cardService.Location = new Point(16, 334);
             this.cardService.Size = new Size(348, 110);
             this.Controls.Add(this.cardService);
 
@@ -242,7 +266,7 @@ namespace MSIFlux.GUI
 
             // ===== Config 管理卡片 =====
             this.cardConfig = new ModernCard();
-            this.cardConfig.Location = new Point(16, 410);
+            this.cardConfig.Location = new Point(16, 454);
             this.cardConfig.Size = new Size(348, 68);
             this.Controls.Add(this.cardConfig);
 
@@ -328,6 +352,8 @@ namespace MSIFlux.GUI
         // 复选框
         private CheckBox checkWinFnSwap;
         private CheckBox checkAutoEcoOnBattery;
+        private CheckBox check05msTimer;
+        private CheckBox checkUsbPowerShare;
 
         // 语言选择
         private Panel panelLangBox;

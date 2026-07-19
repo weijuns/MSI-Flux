@@ -1,4 +1,4 @@
-﻿// This file is part of MSIFlux, based on YAMDCC.
+// This file is part of MSIFlux, based on YAMDCC.
 // Licensed under GPL-3.0-or-later.
 //
 // "单 exe 双角色" 架构入口:
@@ -278,6 +278,12 @@ namespace MSIFlux.GUI
             Application.SetCompatibleTextRenderingDefault(false);
 
             Extra.ApplySavedLanguage();
+
+            // 自动装载高精度定时器设置 (0.5ms)
+            if (MSIFlux.Common.Configs.CommonConfig.GetEnable05msTimer())
+            {
+                MSIFlux.GUI.Helpers.TimerResolution.SetState(true);
+            }
 
             // --- 确保 Windows 服务存在并在运行 ---
             if (!EnsureServiceReady(silentMode))

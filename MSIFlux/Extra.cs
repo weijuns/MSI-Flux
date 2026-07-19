@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
@@ -69,6 +69,8 @@ namespace MSIFlux.GUI
 
             checkWinFnSwap.CheckedChanged += CheckWinFnSwap_CheckedChanged;
             checkAutoEcoOnBattery.CheckedChanged += CheckAutoEcoOnBattery_CheckedChanged;
+            check05msTimer.CheckedChanged += Check05msTimer_CheckedChanged;
+            checkUsbPowerShare.CheckedChanged += CheckUsbPowerShare_CheckedChanged;
 
             buttonStopMSIService.Click += ButtonStopMSIService_Click;
             buttonStartMSIService.Click += ButtonStartMSIService_Click;
@@ -256,6 +258,8 @@ namespace MSIFlux.GUI
             try
             {
                 checkAutoEcoOnBattery.Checked = MSIFlux.Common.Configs.CommonConfig.GetAutoEcoOnBattery();
+                check05msTimer.Checked = MSIFlux.Common.Configs.CommonConfig.GetEnable05msTimer();
+                checkUsbPowerShare.Checked = UsbPowerShare.GetState() || MSIFlux.Common.Configs.CommonConfig.GetEnableUsbPowerShare();
             }
             catch { }
         }
@@ -267,6 +271,20 @@ namespace MSIFlux.GUI
                 _config.KeySwapConf.Enabled = checkWinFnSwap.Checked;
                 SaveConfig();
             }
+        }
+
+        private void Check05msTimer_CheckedChanged(object? sender, EventArgs e)
+        {
+            bool enabled = check05msTimer.Checked;
+            MSIFlux.Common.Configs.CommonConfig.SetEnable05msTimer(enabled);
+            TimerResolution.SetState(enabled);
+        }
+
+        private void CheckUsbPowerShare_CheckedChanged(object? sender, EventArgs e)
+        {
+            bool enabled = checkUsbPowerShare.Checked;
+            MSIFlux.Common.Configs.CommonConfig.SetEnableUsbPowerShare(enabled);
+            UsbPowerShare.SetState(enabled);
         }
 
         private void CheckAutoEcoOnBattery_CheckedChanged(object? sender, EventArgs e)
