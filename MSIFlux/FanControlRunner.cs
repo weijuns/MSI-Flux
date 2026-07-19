@@ -315,11 +315,61 @@ public sealed class FanControlRunner : IDisposable
                 catch { }
             }
             ConfigChanged?.Invoke(this, EventArgs.Empty);
+
+            // 弹出屏幕提示 (OSD Toast)
+            ShowPerfModeToast(mode);
         }
         finally
         {
             _pollSuspended = false;
         }
+    }
+
+    private void ShowPerfModeToast(int mode)
+    {
+        try
+        {
+            string rawName = "";
+            if (_config?.PerfModeConf?.PerfModes != null && mode >= 0 && mode < _config.PerfModeConf.PerfModes.Count)
+            {
+                rawName = _config.PerfModeConf.PerfModes[mode].Name ?? "";
+            }
+
+            string displayName;
+            System.Drawing.Image? icon = null;
+
+            switch (rawName.ToLowerInvariant())
+            {
+                case "maximum battery life":
+                case "eco":
+                case "省电模式":
+                    displayName = "省电模式";
+                    icon = Properties.Resources.icons8_batterie_voll_geladen_48;
+                    break;
+                case "silent":
+                case "静音模式":
+                    displayName = "静音模式";
+                    icon = Properties.Resources.icons8_bicycle_48__1_;
+                    break;
+                case "balanced":
+                case "平衡模式":
+                    displayName = "平衡模式";
+                    icon = Properties.Resources.icons8_spa_flower_48;
+                    break;
+                case "high performance":
+                case "turbo":
+                case "增强模式":
+                    displayName = "增强模式";
+                    icon = Properties.Resources.icons8_rocket_48;
+                    break;
+                default:
+                    displayName = string.IsNullOrEmpty(rawName) ? $"模式 {mode + 1}" : rawName;
+                    break;
+            }
+
+            OsdToastForm.ShowToast(displayName, icon);
+        }
+        catch { }
     }
 
     public void NextPerfMode()
