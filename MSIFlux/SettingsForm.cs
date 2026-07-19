@@ -673,6 +673,17 @@ namespace MSIFlux.GUI
 
         private void ButtonFans_Click(object? sender, EventArgs e) => FansToggle();
 
+        private void PositionExtraForm()
+        {
+            if (extraForm != null && !extraForm.IsDisposed)
+            {
+                // 右侧边在主页面的左侧，底边与主页面底边平行
+                int extraFormLeft = this.Left - extraForm.Width;
+                int extraFormTop = this.Bottom - extraForm.Height;
+                extraForm.Location = new Point(extraFormLeft, extraFormTop);
+            }
+        }
+
         private void ButtonKeyboard_Click(object? sender, EventArgs e)
         {
             if (extraForm == null || extraForm.IsDisposed)
@@ -691,18 +702,15 @@ namespace MSIFlux.GUI
             }
             else
             {
-                int extraFormLeft = this.Left - extraForm.Width;
-                int extraFormTop = this.Bottom - extraForm.Height;
-                
-                Screen screen = Screen.FromControl(this);
-                extraFormLeft = Math.Max(screen.Bounds.Left, extraFormLeft);
-                extraFormTop = Math.Max(screen.Bounds.Top, extraFormTop);
-                if (extraFormTop + extraForm.Height > screen.Bounds.Bottom)
-                    extraFormTop = screen.Bounds.Bottom - extraForm.Height;
-                
-                extraForm.Location = new Point(extraFormLeft, extraFormTop);
+                PositionExtraForm();
                 extraForm.Show();
             }
+        }
+
+        protected override void OnLocationChanged(EventArgs e)
+        {
+            base.OnLocationChanged(e);
+            PositionExtraForm();
         }
 
         private void SliderBattery_ValueChanged(object? sender, EventArgs e)
