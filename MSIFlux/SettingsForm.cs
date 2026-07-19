@@ -494,20 +494,19 @@ namespace MSIFlux.GUI
                         fansForm.SetPerfMode(modeIndex);
                     }
 
-                    // Move slow operations (WMI, IPC, file I/O) off the UI thread
-                    // so the first switch after idle doesn't feel sluggish.
+                    // 统一通过 FanRunner.SetPerfMode 触发服务写 EC、发送 IPC 和弹出屏幕 OSD
                     int capturedMode = modeIndex;
                     _ = Task.Run(() =>
                     {
                         try
                         {
+                            Program.FanRunner?.SetPerfMode(capturedMode);
                             ApplyCPUBoostForPerfMode(capturedMode);
                             ApplyPowerPlanForPerfMode(capturedMode);
                             if (_isAutoMode)
                             {
                                 this.Invoke(() => ApplyAutoScreenRefreshRate());
                             }
-                            SaveConfig();
                         }
                         catch (Exception ex)
                         {
@@ -1241,7 +1240,16 @@ namespace MSIFlux.GUI
         {
             var config = Program.FanRunner?.GetConfig();
             if (config?.PerfModeConf != null)
-                VisualisePerfMode(config.PerfModeConf.ModeSel);
+            {
+                _config = config; // 同步 GUI 端的内存配置
+                int modeSel = config.PerfModeConf.ModeSel;
+                VisualisePerfMode(modeSel);
+                ApplyPerfModeFanConfig(modeSel);
+                if (fansForm != null && fansForm.Visible)
+                {
+                    fansForm.SetPerfMode(modeSel);
+                }
+            }
         }
     }
     }
