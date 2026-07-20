@@ -151,9 +151,17 @@ internal sealed class ServiceIpcProxy : IDisposable
     public void ToggleMuteLed(TimeSpan? timeout = null)
         => SendAndWaitForAck(Command.ToggleMuteLed, timeout);
 
+    /// <summary>设置键盘声音静音 LED 亮灭 (F1 按键灯).</summary>
+    public void SetAudioMuteLed(bool on, TimeSpan? timeout = null)
+        => SendAndWaitForAck(Command.SetAudioMuteLed, timeout, on);
+
     /// <summary>翻转键盘麦克风静音 LED (F5 按键灯).</summary>
     public void ToggleMicLed(TimeSpan? timeout = null)
         => SendAndWaitForAck(Command.ToggleMicLed, timeout);
+
+    /// <summary>设置键盘麦克风静音 LED 亮灭 (F5 按键灯).</summary>
+    public void SetMicMuteLed(bool on, TimeSpan? timeout = null)
+        => SendAndWaitForAck(Command.SetMicMuteLed, timeout, on);
 
     /// <summary>读取指定风扇对应传感器的温度 (°C). 失败返回 -1.</summary>
     public int GetTemp(int fanIndex, TimeSpan? timeout = null)

@@ -1,4 +1,4 @@
-﻿using MessagePack;
+using MessagePack;
 
 namespace MSIFlux.IPC;
 
@@ -247,6 +247,20 @@ public enum Command
     /// <para>This command expects no arguments.</para>
     /// </remarks>
     ToggleMicLed,
+    /// <summary>
+    /// Sets the keyboard mute LED state.
+    /// </summary>
+    /// <remarks>
+    /// <para>This command expects a <see langword="bool"/> argument: true to turn on, false to turn off.</para>
+    /// </remarks>
+    SetAudioMuteLed,
+    /// <summary>
+    /// Sets the keyboard microphone mute LED state.
+    /// </summary>
+    /// <remarks>
+    /// <para>This command expects a <see langword="bool"/> argument: true to turn on, false to turn off.</para>
+    /// </remarks>
+    SetMicMuteLed,
 }
 
 /// <summary>

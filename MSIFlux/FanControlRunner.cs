@@ -289,6 +289,8 @@ public sealed class FanControlRunner : IDisposable
 
     public void ToggleMuteLed() => _ipc.ToggleMuteLed();
     public void ToggleMicLed() => _ipc.ToggleMicLed();
+    public void SetAudioMuteLed(bool on) => _ipc.SetAudioMuteLed(on);
+    public void SetMicMuteLed(bool on) => _ipc.SetMicMuteLed(on);
 
     public void SetPerfMode(int mode)
     {

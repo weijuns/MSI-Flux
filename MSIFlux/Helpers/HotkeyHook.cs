@@ -23,12 +23,18 @@ internal sealed class HotkeyHook : IDisposable
     // 注意: Fn+F7 不走键盘钩子, 由服务端 EC[0xC0] 轮询处理 (避免与 W 键共享 scanCode 0x0011 的冲突)
     private static readonly Dictionary<uint, (string, Action<FanControlRunner>)> ScanMap = new()
     {
-        [0x0071] = ("Fn+F5 麦克风静音", r => { ToggleMicAction(); r.ToggleMicLed(); }),
+        [0x0071] = ("Fn+F5 麦克风静音", r => {
+            bool muted = AudioStateController.ToggleMicMute();
+            r.SetMicMuteLed(muted);
+        }),
     };
     // VK 码 → 动作
     private static readonly Dictionary<uint, (string, Action<FanControlRunner>)> VkMap = new()
     {
-        [0xAD] = ("Fn+F1 静音", r => { SendMuteKey(); r.ToggleMuteLed(); }),
+        [0xAD] = ("Fn+F1 静音", r => {
+            bool muted = AudioStateController.ToggleSpeakerMute();
+            r.SetAudioMuteLed(muted);
+        }),
     };
     #endregion
 
@@ -77,6 +83,20 @@ internal sealed class HotkeyHook : IDisposable
         _hookId = SetWindowsHookEx(WH_KEYBOARD_LL, _proc!,
             cp.MainModule != null ? GetModuleHandle(cp.MainModule.ModuleName) : IntPtr.Zero, 0);
         SafeLog(_hookId != IntPtr.Zero ? "Fn 热键已安装 (IPC LED)" : "Fn 热键失败");
+
+        // 启动时自动同步一次 F1 与 F5 的白色指示灯状态
+        _ = Task.Run(() =>
+        {
+            try
+            {
+                bool spkMuted = AudioStateController.GetSpeakerMute();
+                _runner.SetAudioMuteLed(spkMuted);
+
+                bool micMuted = AudioStateController.GetMicMute();
+                _runner.SetMicMuteLed(micMuted);
+            }
+            catch { }
+        });
     }
 
     private IntPtr HookProc(int nCode, IntPtr wParam, IntPtr lParam)

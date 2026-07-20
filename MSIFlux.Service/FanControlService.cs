@@ -303,6 +303,8 @@ internal sealed partial class FanControlService : ServiceBase
             case Command.ReportGpuMode:         HandleReportGpuMode(id, args); break;
             case Command.ToggleMuteLed:
             case Command.ToggleMicLed:          HandleToggleLed(id, cmd); break;
+            case Command.SetAudioMuteLed:       HandleSetLed(id, cmd, args, isMic: false); break;
+            case Command.SetMicMuteLed:         HandleSetLed(id, cmd, args, isMic: true); break;
             default:
                 Log.Error(Strings.GetString("errBadCmd", cmd));
                 IPCServer.PushMessage(new ServiceResponse(Response.Error, (int)cmd), id);
@@ -499,6 +501,17 @@ internal sealed partial class FanControlService : ServiceBase
         bool isMute = cmd == Command.ToggleMuteLed;
         IPCServer.PushMessage(new ServiceResponse(Response.Success, (int)cmd), id);
         _ = Task.Run(() => { try { WmiToggleLed(isMute); } catch { } });
+    }
+
+    private void HandleSetLed(int id, Command cmd, object[] args, bool isMic)
+    {
+        if (args == null || args.Length == 0 || !(args[0] is bool on))
+        {
+            SendBadArgs(cmd, args, id);
+            return;
+        }
+        IPCServer.PushMessage(new ServiceResponse(Response.Success, (int)cmd), id);
+        _ = Task.Run(() => { try { WmiSetLed(isMic, on); } catch { } });
     }
 
     private void SendBadArgs(Command cmd, object[] args, int? clientId = null)
@@ -1525,5 +1538,52 @@ internal sealed partial class FanControlService : ServiceBase
             return;
         }
         Log.Info($"WMI LED: {moCount} MSI_ACPI, ok={okCount} fail={failCount}, muteLed={(muteLed ? "F1" : "F5")}");
+    }
+
+    private void WmiSetLed(bool isMic, bool on)
+    {
+        int moCount = 0, okCount = 0, failCount = 0;
+        try
+        {
+            using var searcher = new System.Management.ManagementObjectSearcher(
+                @"root\wmi", "SELECT * FROM MSI_ACPI");
+            foreach (System.Management.ManagementObject mo in searcher.Get())
+            {
+                moCount = 1;
+                foreach (byte reg in LedRegs)
+                {
+                    try
+                    {
+                        var rPkg = new System.Management.ManagementClass(@"root\wmi:Package_32", null).CreateInstance();
+                        var rBuf = new byte[32]; rBuf[0] = reg;
+                        rPkg["Bytes"] = rBuf;
+                        var rIn = mo.GetMethodParameters("Get_Data"); rIn["Data"] = rPkg;
+                        var rOut = mo.InvokeMethod("Get_Data", rIn, null);
+                        byte curVal = 0;
+                        if (rOut?["Data"] is System.Management.ManagementBaseObject rObj)
+                            foreach (System.Management.PropertyData pd in rObj.Properties)
+                                if (pd.IsArray && pd.Value is byte[] r && r.Length > 1) { curVal = r[1]; break; }
+
+                        byte bit = isMic ? (byte)1 : (byte)0;
+                        byte next = on ? (byte)(curVal | (1 << bit)) : (byte)(curVal & ~(1 << bit));
+
+                        var wPkg = new System.Management.ManagementClass(@"root\wmi:Package_32", null).CreateInstance();
+                        var wBuf = new byte[32]; wBuf[0] = reg; wBuf[1] = next;
+                        wPkg["Bytes"] = wBuf;
+                        var wIn = mo.GetMethodParameters("Set_Data"); wIn["Data"] = wPkg;
+                        mo.InvokeMethod("Set_Data", wIn, null);
+                        okCount++;
+                    }
+                    catch { failCount++; }
+                }
+                break;
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Error($"WMI LED exception: {ex.Message}");
+            return;
+        }
+        Log.Info($"WMI LED: set {(isMic ? "Mic(F5)" : "Audio(F1)")} LED -> {(on ? "ON" : "OFF")}, ok={okCount}");
     }
 }
