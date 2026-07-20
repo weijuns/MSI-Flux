@@ -19,21 +19,26 @@ internal sealed class HotkeyHook : IDisposable
     private readonly HashSet<uint> _dedup = new();
     private bool _disposed;
 
+    private static bool _audioMutedState = false;
+    private static bool _micMutedState = false;
+
     // 扫描码 → 动作
     // 注意: Fn+F7 不走键盘钩子, 由服务端 EC[0xC0] 轮询处理 (避免与 W 键共享 scanCode 0x0011 的冲突)
     private static readonly Dictionary<uint, (string, Action<FanControlRunner>)> ScanMap = new()
     {
         [0x0071] = ("Fn+F5 麦克风静音", r => {
-            bool muted = AudioStateController.ToggleMicMute();
-            r.SetMicMuteLed(muted);
+            _micMutedState = !_micMutedState;
+            try { _micMutedState = AudioStateController.ToggleMicMute(); } catch { }
+            r.SetMicMuteLed(_micMutedState);
         }),
     };
     // VK 码 → 动作
     private static readonly Dictionary<uint, (string, Action<FanControlRunner>)> VkMap = new()
     {
         [0xAD] = ("Fn+F1 静音", r => {
-            bool muted = AudioStateController.ToggleSpeakerMute();
-            r.SetAudioMuteLed(muted);
+            _audioMutedState = !_audioMutedState;
+            try { _audioMutedState = AudioStateController.ToggleSpeakerMute(); } catch { }
+            r.SetAudioMuteLed(_audioMutedState);
         }),
     };
     #endregion

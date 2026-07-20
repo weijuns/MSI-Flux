@@ -2,12 +2,22 @@
 // AudioStateController: 基于 Windows CoreAudio API 控制系统主音量静音 (F1) 与麦克风禁用 (F5)
 
 using System;
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 
 namespace MSIFlux.GUI.Helpers;
 
 public static class AudioStateController
 {
+    [DllImport("ole32.dll", SetLastError = true, CallingConvention = CallingConvention.StdCall)]
+    private static extern int CoInitializeEx([In, Optional] IntPtr pvReserved, [In] uint dwCoInit);
+
+    [DllImport("ole32.dll", SetLastError = true, CallingConvention = CallingConvention.StdCall)]
+    private static extern void CoUninitialize();
+
+    private const uint COINIT_MULTITHREADED = 0x0;
+    private const uint COINIT_APARTMENTTHREADED = 0x2;
+
     #region COM Interfaces
     [ComImport]
     [Guid("BCDE0385-4926-40E9-87C5-69A31D764516")]
@@ -69,18 +79,28 @@ public static class AudioStateController
     {
         try
         {
+            CoInitializeEx(IntPtr.Zero, COINIT_MULTITHREADED);
             var enumerator = (IMMDeviceEnumerator)new MMDeviceEnumerator();
             int hr = enumerator.GetDefaultAudioEndpoint(flow, ERole.eConsole, out IMMDevice device);
-            if (hr != 0 || device == null) return null;
+            if (hr != 0 || device == null)
+            {
+                Debug.WriteLine($"GetDefaultAudioEndpoint failed hr=0x{hr:X8}");
+                return null;
+            }
 
             Guid iid = typeof(IAudioEndpointVolume).GUID;
             hr = device.Activate(ref iid, 23, IntPtr.Zero, out object volumeObj);
-            if (hr != 0 || volumeObj == null) return null;
+            if (hr != 0 || volumeObj == null)
+            {
+                Debug.WriteLine($"Activate IAudioEndpointVolume failed hr=0x{hr:X8}");
+                return null;
+            }
 
             return (IAudioEndpointVolume)volumeObj;
         }
-        catch
+        catch (Exception ex)
         {
+            Debug.WriteLine($"GetEndpointVolume Exception: {ex.Message}");
             return null;
         }
     }
@@ -90,23 +110,37 @@ public static class AudioStateController
     /// </summary>
     public static bool GetSpeakerMute()
     {
-        var vol = GetEndpointVolume(EDataFlow.eRender);
-        if (vol != null && vol.GetMute(out bool isMuted) == 0)
+        try
         {
-            return isMuted;
+            var vol = GetEndpointVolume(EDataFlow.eRender);
+            if (vol != null && vol.GetMute(out bool isMuted) == 0)
+            {
+                return isMuted;
+            }
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"GetSpeakerMute ex: {ex.Message}");
         }
         return false;
     }
 
     public static bool ToggleSpeakerMute()
     {
-        var vol = GetEndpointVolume(EDataFlow.eRender);
-        if (vol != null && vol.GetMute(out bool current) == 0)
+        try
         {
-            bool next = !current;
-            Guid ctx = Guid.Empty;
-            vol.SetMute(next, ref ctx);
-            return next;
+            var vol = GetEndpointVolume(EDataFlow.eRender);
+            if (vol != null && vol.GetMute(out bool current) == 0)
+            {
+                bool next = !current;
+                Guid ctx = Guid.Empty;
+                vol.SetMute(next, ref ctx);
+                return next;
+            }
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"ToggleSpeakerMute ex: {ex.Message}");
         }
         return false;
     }
@@ -116,23 +150,37 @@ public static class AudioStateController
     /// </summary>
     public static bool GetMicMute()
     {
-        var vol = GetEndpointVolume(EDataFlow.eCapture);
-        if (vol != null && vol.GetMute(out bool isMuted) == 0)
+        try
         {
-            return isMuted;
+            var vol = GetEndpointVolume(EDataFlow.eCapture);
+            if (vol != null && vol.GetMute(out bool isMuted) == 0)
+            {
+                return isMuted;
+            }
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"GetMicMute ex: {ex.Message}");
         }
         return false;
     }
 
     public static bool ToggleMicMute()
     {
-        var vol = GetEndpointVolume(EDataFlow.eCapture);
-        if (vol != null && vol.GetMute(out bool current) == 0)
+        try
         {
-            bool next = !current;
-            Guid ctx = Guid.Empty;
-            vol.SetMute(next, ref ctx);
-            return next;
+            var vol = GetEndpointVolume(EDataFlow.eCapture);
+            if (vol != null && vol.GetMute(out bool current) == 0)
+            {
+                bool next = !current;
+                Guid ctx = Guid.Empty;
+                vol.SetMute(next, ref ctx);
+                return next;
+            }
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"ToggleMicMute ex: {ex.Message}");
         }
         return false;
     }
