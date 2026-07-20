@@ -1540,21 +1540,36 @@ internal sealed partial class FanControlService : ServiceBase
     {
         int moCount = 0, okCount = 0;
 
-        // 1. 确定硬件 EC LED 寄存器
-        // 0x2C / 0xD8 是 Audio Mute (F1) LED; 0x2E / 0xD9 是 Mic Mute (F5) LED
-        byte[] targetRegs = isMic ? new byte[] { 0x2E, 0xD9, 0x2D, 0x2F } : new byte[] { 0x2C, 0xD8, 0x2A, 0x2B };
+        // 1. 确定硬件 EC LED 寄存器:
+        // 0x2C / 0xD8 / 0x3A 是 Audio Mute (F1) LED
+        // 0x2E / 0xD9 / 0x3B 是 Mic Mute (F5) LED
+        byte[] targetRegs = isMic ? new byte[] { 0x2E, 0xD9, 0x3B, 0x2D, 0x2F } : new byte[] { 0x2C, 0xD8, 0x3A, 0x2A, 0x2B };
 
         try
         {
+            // 解锁微星 EC[0xC1] 热键/LED 控制接管位 (Bit7=1)
+            byte origC1 = 0;
+            bool hasC1 = _EC.ReadByte(0xC1, out origC1);
+            if (hasC1)
+            {
+                _EC.WriteByte(0xC1, (byte)(origC1 | 0x80));
+            }
+
             foreach (byte reg in targetRegs)
             {
                 if (_EC.ReadByte(reg, out byte curVal))
                 {
-                    // 试写纯 0x01 / 0x00 模式及位掩码模式
+                    // 设置为 0x01 / 0x80 高电平点亮，0x00 熄灭
                     byte next = on ? (byte)(curVal | 0x01 | 0x80) : (byte)(curVal & ~0x01 & ~0x80);
                     _EC.WriteByte(reg, next);
                     okCount++;
                 }
+            }
+
+            // 还原 EC[0xC1]
+            if (hasC1)
+            {
+                _EC.WriteByte(0xC1, origC1);
             }
         }
         catch { }
