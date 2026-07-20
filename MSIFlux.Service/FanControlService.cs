@@ -1539,6 +1539,24 @@ internal sealed partial class FanControlService : ServiceBase
     private void WmiSetLed(bool isMic, bool on)
     {
         int moCount = 0, okCount = 0, failCount = 0;
+
+        // 1. 直写底层 EC 寄存器 (双保险，保障没有 MSI_ACPI WMI 时依然能点亮指示灯)
+        try
+        {
+            foreach (byte reg in LedRegs)
+            {
+                if (_EC.ReadByte(reg, out byte curVal))
+                {
+                    byte bit = isMic ? (byte)1 : (byte)0;
+                    byte next = on ? (byte)(curVal | (1 << bit)) : (byte)(curVal & ~(1 << bit));
+                    _EC.WriteByte(reg, next);
+                    okCount++;
+                }
+            }
+        }
+        catch { }
+
+        // 2. WMI ACPI 辅助写入
         try
         {
             using var searcher = new System.Management.ManagementObjectSearcher(
@@ -1568,9 +1586,8 @@ internal sealed partial class FanControlService : ServiceBase
                         wPkg["Bytes"] = wBuf;
                         var wIn = mo.GetMethodParameters("Set_Data"); wIn["Data"] = wPkg;
                         mo.InvokeMethod("Set_Data", wIn, null);
-                        okCount++;
                     }
-                    catch { failCount++; }
+                    catch { }
                 }
                 break;
             }
@@ -1578,8 +1595,7 @@ internal sealed partial class FanControlService : ServiceBase
         catch (Exception ex)
         {
             Log.Error($"WMI LED exception: {ex.Message}");
-            return;
         }
-        Log.Info($"WMI LED: set {(isMic ? "Mic(F5)" : "Audio(F1)")} LED -> {(on ? "ON" : "OFF")}, ok={okCount}");
+        Log.Info($"Direct EC / WMI LED: set {(isMic ? "Mic(F5)" : "Audio(F1)")} LED -> {(on ? "ON" : "OFF")}, ok={okCount}");
     }
 }
