@@ -1538,17 +1538,20 @@ internal sealed partial class FanControlService : ServiceBase
 
     private void WmiSetLed(bool isMic, bool on)
     {
-        int moCount = 0, okCount = 0, failCount = 0;
+        int moCount = 0, okCount = 0;
 
-        // 1. 直写底层 EC 寄存器 (双保险，保障没有 MSI_ACPI WMI 时依然能点亮指示灯)
+        // 1. 确定硬件 EC LED 寄存器
+        // 0x2C / 0xD8 是 Audio Mute (F1) LED; 0x2E / 0xD9 是 Mic Mute (F5) LED
+        byte[] targetRegs = isMic ? new byte[] { 0x2E, 0xD9, 0x2D, 0x2F } : new byte[] { 0x2C, 0xD8, 0x2A, 0x2B };
+
         try
         {
-            foreach (byte reg in LedRegs)
+            foreach (byte reg in targetRegs)
             {
                 if (_EC.ReadByte(reg, out byte curVal))
                 {
-                    byte bit = isMic ? (byte)1 : (byte)0;
-                    byte next = on ? (byte)(curVal | (1 << bit)) : (byte)(curVal & ~(1 << bit));
+                    // 试写纯 0x01 / 0x00 模式及位掩码模式
+                    byte next = on ? (byte)(curVal | 0x01 | 0x80) : (byte)(curVal & ~0x01 & ~0x80);
                     _EC.WriteByte(reg, next);
                     okCount++;
                 }
@@ -1556,7 +1559,7 @@ internal sealed partial class FanControlService : ServiceBase
         }
         catch { }
 
-        // 2. WMI ACPI 辅助写入
+        // 2. WMI ACPI 辅助控制
         try
         {
             using var searcher = new System.Management.ManagementObjectSearcher(
@@ -1564,7 +1567,7 @@ internal sealed partial class FanControlService : ServiceBase
             foreach (System.Management.ManagementObject mo in searcher.Get())
             {
                 moCount = 1;
-                foreach (byte reg in LedRegs)
+                foreach (byte reg in targetRegs)
                 {
                     try
                     {
@@ -1578,8 +1581,7 @@ internal sealed partial class FanControlService : ServiceBase
                             foreach (System.Management.PropertyData pd in rObj.Properties)
                                 if (pd.IsArray && pd.Value is byte[] r && r.Length > 1) { curVal = r[1]; break; }
 
-                        byte bit = isMic ? (byte)1 : (byte)0;
-                        byte next = on ? (byte)(curVal | (1 << bit)) : (byte)(curVal & ~(1 << bit));
+                        byte next = on ? (byte)(curVal | 0x01 | 0x80) : (byte)(curVal & ~0x01 & ~0x80);
 
                         var wPkg = new System.Management.ManagementClass(@"root\wmi:Package_32", null).CreateInstance();
                         var wBuf = new byte[32]; wBuf[0] = reg; wBuf[1] = next;
