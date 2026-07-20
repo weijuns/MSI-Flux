@@ -1,7 +1,11 @@
 // MSI Flux GUI — Fn 热键检测 (键盘钩子 → IPC → Service / WMI ACPI LED)
+// 摄像头状态监听 (Fn+F6 由 BIOS 处理, 我们只监控状态弹 OSD)
 
 using System.Diagnostics;
+using System.Management;
 using System.Runtime.InteropServices;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace MSIFlux.GUI.Helpers;
 
@@ -28,8 +32,9 @@ internal sealed class HotkeyHook : IDisposable
     {
         [0x0071] = ("Fn+F5 麦克风静音", r => {
             _micMutedState = !_micMutedState;
-            try { _micMutedState = AudioStateController.ToggleMicMute(); } catch { }
+            try { ToggleMicAction(); } catch { }
             r.SetMicMuteLed(_micMutedState);
+            OsdToastForm.ShowToast(_micMutedState ? "麦克风已禁用" : "麦克风已启用");
         }),
     };
     // VK 码 → 动作
@@ -37,8 +42,9 @@ internal sealed class HotkeyHook : IDisposable
     {
         [0xAD] = ("Fn+F1 静音", r => {
             _audioMutedState = !_audioMutedState;
-            try { _audioMutedState = AudioStateController.ToggleSpeakerMute(); } catch { }
+            try { AudioStateController.ToggleSpeakerMute(); } catch { }
             r.SetAudioMuteLed(_audioMutedState);
+            OsdToastForm.ShowToast(_audioMutedState ? "静音" : "取消静音");
         }),
     };
     #endregion
@@ -63,6 +69,10 @@ internal sealed class HotkeyHook : IDisposable
     {
         try { SendMessageW(GetForegroundWindow(), 0x0319, IntPtr.Zero, (IntPtr)0x180000); } catch { }
     }
+
+    // 摄像头状态: 通过 WMI MSI_Event 监听 Fn+F6 (事件码 87)
+    private ManagementEventWatcher? _camWatcher;
+    private bool _camDisabled;
 
     [DllImport("user32.dll", SetLastError = true)]
     private static extern IntPtr SetWindowsHookEx(int idHook, LowLevelKeyboardProc lpfn, IntPtr hMod, uint tid);
@@ -89,15 +99,20 @@ internal sealed class HotkeyHook : IDisposable
             cp.MainModule != null ? GetModuleHandle(cp.MainModule.ModuleName) : IntPtr.Zero, 0);
         SafeLog(_hookId != IntPtr.Zero ? "Fn 热键已安装 (IPC LED)" : "Fn 热键失败");
 
+        // 启动 WMI 事件监听 (Fn+F6 摄像头等)
+        StartWmiEventWatcher();
+
         // 启动时自动同步一次 F1 与 F5 的白色指示灯状态
         _ = Task.Run(() =>
         {
             try
             {
                 bool spkMuted = AudioStateController.GetSpeakerMute();
+                _audioMutedState = spkMuted;
                 _runner.SetAudioMuteLed(spkMuted);
 
                 bool micMuted = AudioStateController.GetMicMute();
+                _micMutedState = micMuted;
                 _runner.SetMicMuteLed(micMuted);
             }
             catch { }
@@ -146,7 +161,42 @@ internal sealed class HotkeyHook : IDisposable
         return CallNextHookEx(_hookId, nCode, wParam, lParam);
     }
 
+    // WMI MSI_Event 事件监听 (MSI 官方方式: Fn+F6 摄像头=87, 麦克风=25, 性能=29 等)
+    private void StartWmiEventWatcher()
+    {
+        try
+        {
+            var scope = new ManagementScope(@"root\wmi");
+            scope.Connect();
+            var query = new WqlEventQuery("SELECT * FROM MSI_Event");
+            _camWatcher = new ManagementEventWatcher(scope, query);
+            _camWatcher.EventArrived += (_, e) =>
+            {
+                try
+                {
+                    int code = 0;
+                    foreach (PropertyData p in e.NewEvent.Properties)
+                    {
+                        if (p.Name == "MSIEvt" && p.Value != null && int.TryParse(p.Value.ToString(), out int v))
+                        { code = v & 0xFF; break; }  // MSI 用 & 0xFF 提取事件码
+                    }
+
+                    const int Webcam = 87;       // WMIEventCode.Webcam
+                    if (code == Webcam)
+                    {
+                        _camDisabled = !_camDisabled;
+                        OsdToastForm.ShowToast(_camDisabled ? "摄像头已禁用" : "摄像头已启用");
+                    }
+                }
+                catch { }
+            };
+            _camWatcher.Start();
+            SafeLog("WMI MSI_Event 监听已启动 (摄像头 OSD)");
+        }
+        catch (Exception ex) { SafeLog($"WMI MSI_Event 监听失败: {ex.Message}"); }
+    }
+
     private void SafeLog(string msg) { try { _log?.Info(msg); } catch { Debug.WriteLine(msg); } }
     public void Dispose()
-    { if (_disposed) return; _disposed = true; if (_hookId != IntPtr.Zero) { UnhookWindowsHookEx(_hookId); } }
+    { if (_disposed) return; _disposed = true; _camWatcher?.Stop(); _camWatcher?.Dispose(); if (_hookId != IntPtr.Zero) { UnhookWindowsHookEx(_hookId); } }
 }

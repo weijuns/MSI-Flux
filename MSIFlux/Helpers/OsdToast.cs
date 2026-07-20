@@ -1,6 +1,4 @@
-// This file is part of MSIFlux.
-// OsdToast: 高颜值无焦点屏幕悬浮提示 (OSD Toast - 标准 WinForms 线程安全版本)
-
+// MSIFlux OsdToast — MSI 风格屏幕悬浮提示
 using System;
 using System.Drawing;
 using System.Drawing.Drawing2D;
@@ -12,32 +10,21 @@ internal static class DrawingUtils
 {
     public static GraphicsPath RoundedRect(Rectangle bounds, int radius)
     {
-        int diameter = radius * 2;
-        Size size = new Size(diameter, diameter);
-        Rectangle arc = new Rectangle(bounds.Location, size);
-        GraphicsPath path = new GraphicsPath();
-
-        if (radius <= 0)
-        {
-            path.AddRectangle(bounds);
-            return path;
-        }
-
-        path.AddArc(arc, 180, 90);
-        arc.X = bounds.Right - diameter;
-        path.AddArc(arc, 270, 90);
-        arc.Y = bounds.Bottom - diameter;
-        path.AddArc(arc, 0, 90);
-        arc.X = bounds.Left;
-        path.AddArc(arc, 90, 90);
+        int d = radius * 2;
+        var path = new GraphicsPath();
+        if (radius <= 0) { path.AddRectangle(bounds); return path; }
+        path.AddArc(bounds.X, bounds.Y, d, d, 180, 90);
+        path.AddArc(bounds.Right - d, bounds.Y, d, d, 270, 90);
+        path.AddArc(bounds.Right - d, bounds.Bottom - d, d, d, 0, 90);
+        path.AddArc(bounds.X, bounds.Bottom - d, d, d, 90, 90);
         path.CloseFigure();
         return path;
     }
 
-    public static void FillRoundedRectangle(this Graphics graphics, Brush brush, Rectangle bounds, int cornerRadius)
+    public static void FillRoundedRectangle(this Graphics g, Brush b, Rectangle r, int radius)
     {
-        using GraphicsPath path = RoundedRect(bounds, cornerRadius);
-        graphics.FillPath(brush, path);
+        using var path = RoundedRect(r, radius);
+        g.FillPath(b, path);
     }
 }
 
@@ -45,152 +32,138 @@ public class OsdToastForm : Form
 {
     private static OsdToastForm? _instance;
     private static readonly object _lock = new();
-
-    private string _toastText = "";
-    private Image? _toastIcon;
+    private string _text = "";
     private System.Windows.Forms.Timer _hideTimer;
+    private float _opacity = 0f;
+    private System.Windows.Forms.Timer _fadeTimer;
+    private bool _fadingIn = true;
 
     public OsdToastForm()
     {
-        // 窗体样式配置
         FormBorderStyle = FormBorderStyle.None;
         StartPosition = FormStartPosition.Manual;
         ShowInTaskbar = false;
         TopMost = true;
         DoubleBuffered = true;
         BackColor = Color.Black;
-        TransparencyKey = Color.Black; // 黑色透明背景
+        TransparencyKey = Color.Black;
+        Opacity = 0;
 
-        _hideTimer = new System.Windows.Forms.Timer
+        _hideTimer = new System.Windows.Forms.Timer { Interval = 2000 };
+        _hideTimer.Tick += (_, _) => StartFadeOut();
+
+        _fadeTimer = new System.Windows.Forms.Timer { Interval = 20 };
+        _fadeTimer.Tick += FadeTick;
+    }
+
+    private void FadeTick(object? _, EventArgs e)
+    {
+        if (_fadingIn)
         {
-            Interval = 2000
-        };
-        _hideTimer.Tick += HideTimer_Tick;
+            _opacity += 0.08f;
+            if (_opacity >= 1f) { _opacity = 1f; _fadeTimer.Stop(); _hideTimer.Start(); }
+        }
+        else
+        {
+            _opacity -= 0.06f;
+            if (_opacity <= 0) { _opacity = 0; _fadeTimer.Stop(); Hide(); }
+        }
+        Opacity = _opacity;
+    }
+
+    private void StartFadeOut()
+    {
+        _hideTimer.Stop();
+        _fadingIn = false;
+        _fadeTimer.Start();
     }
 
     protected override CreateParams CreateParams
     {
         get
         {
-            CreateParams cp = base.CreateParams;
-            cp.ExStyle |= 0x08000000; // WS_EX_NOACTIVATE (不夺取窗口与游戏焦点)
-            cp.ExStyle |= 0x00000080; // WS_EX_TOOLWINDOW (不在任务栏/Alt-Tab中显示)
-            cp.ExStyle |= 0x00000020; // WS_EX_TRANSPARENT (鼠标穿透)
+            var cp = base.CreateParams;
+            cp.ExStyle |= 0x08000000 | 0x00000080 | 0x00000020; // NOACTIVATE | TOOLWINDOW | TRANSPARENT
             return cp;
         }
     }
 
-    /// <summary>
-    /// 静态线程安全调用入口
-    /// </summary>
     public static void ShowToast(string text, Image? icon = null)
     {
         try
         {
             if (Application.OpenForms.Count > 0)
             {
-                Form main = Application.OpenForms[0];
+                var main = Application.OpenForms[0];
                 if (main.IsHandleCreated && main.InvokeRequired)
                 {
-                    main.BeginInvoke(new Action(() => ShowToastInternal(text, icon)));
+                    main.BeginInvoke(() => ShowToastInternal(text));
                     return;
                 }
             }
-            ShowToastInternal(text, icon);
+            ShowToastInternal(text);
         }
         catch { }
     }
 
-    private static void ShowToastInternal(string text, Image? icon)
+    private static void ShowToastInternal(string text)
     {
         lock (_lock)
         {
             if (_instance == null || _instance.IsDisposed)
-            {
                 _instance = new OsdToastForm();
-            }
-            _instance.RunToast(text, icon);
+            _instance.RunToast(text);
         }
     }
 
-    public void RunToast(string text, Image? icon)
+    public void RunToast(string text)
     {
+        _fadeTimer.Stop();
         _hideTimer.Stop();
 
-        _toastText = text;
-        _toastIcon = icon;
+        _text = text;
+        _opacity = 0f;
+        _fadingIn = true;
 
-        Screen screen = Screen.PrimaryScreen ?? Screen.AllScreens[0];
+        var screen = Screen.PrimaryScreen ?? Screen.AllScreens[0];
 
-        int contentWidth = 140 + (_toastIcon != null ? 44 : 0) + (_toastText.Length * 20);
-        Width = Math.Max(220, Math.Min(380, contentWidth));
-        Height = 65;
+        // 紧凑尺寸: 自动适配文字宽度
+        using var g = CreateGraphics();
+        using var f = new Font("Microsoft YaHei UI", 16f, FontStyle.Regular, GraphicsUnit.Pixel);
+        var textSize = g.MeasureString(_text, f);
+        Width = Math.Max(180, Math.Min(360, (int)textSize.Width + 60));
+        Height = 52;
 
         Location = new Point(
             (screen.Bounds.Width - Width) / 2,
-            screen.Bounds.Height - 240 - Height
+            screen.Bounds.Height - 200 - Height
         );
 
-        if (!Visible)
-        {
-            Show();
-        }
-
+        if (!Visible) Show();
         Invalidate();
-        _hideTimer.Start();
+        _fadeTimer.Start();
     }
 
     protected override void OnPaint(PaintEventArgs e)
     {
         base.OnPaint(e);
-
         e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
-        e.Graphics.InterpolationMode = InterpolationMode.HighQualityBicubic;
+        var rect = new Rectangle(0, 0, Width, Height);
 
-        Rectangle rect = new Rectangle(0, 0, Width, Height);
+        // MSI 风格: 深色半透明圆角背景
+        using var bg = new SolidBrush(Color.FromArgb(225, 20, 20, 24));
+        e.Graphics.FillRoundedRectangle(bg, rect, 20);
 
-        // 绘制圆角精致深色卡片背景 (RGB: 24, 24, 28)
-        using (Brush bgBrush = new SolidBrush(Color.FromArgb(235, 24, 24, 28)))
-        {
-            e.Graphics.FillRoundedRectangle(bgBrush, rect, 16);
-        }
+        // 极淡边框
+        using var border = new Pen(Color.FromArgb(30, 255, 255, 255), 1f);
+        using var bp = DrawingUtils.RoundedRect(new Rectangle(0, 0, Width - 1, Height - 1), 20);
+        e.Graphics.DrawPath(border, bp);
 
-        // 微亮细腻边框
-        using (Pen borderPen = new Pen(Color.FromArgb(50, 255, 255, 255), 1.2f))
-        {
-            using GraphicsPath path = DrawingUtils.RoundedRect(new Rectangle(0, 0, Width - 1, Height - 1), 16);
-            e.Graphics.DrawPath(borderPen, path);
-        }
-
-        int startX = 24;
-
-        // 如果有图标，在左侧绘制
-        if (_toastIcon != null)
-        {
-            int iconSize = 32;
-            int iconY = (Height - iconSize) / 2;
-            e.Graphics.DrawImage(_toastIcon, new Rectangle(startX, iconY, iconSize, iconSize));
-            startX += iconSize + 16;
-        }
-
-        // 绘制白色现代字体
-        using StringFormat sf = new StringFormat
-        {
-            LineAlignment = StringAlignment.Center,
-            Alignment = _toastIcon != null ? StringAlignment.Near : StringAlignment.Center
-        };
-
-        using Font font = new Font("Microsoft YaHei UI", 17f, FontStyle.Bold, GraphicsUnit.Pixel);
-        using Brush textBrush = new SolidBrush(Color.FromArgb(245, 245, 248));
-
-        float textX = _toastIcon != null ? startX : Width / 2f;
-        e.Graphics.DrawString(_toastText, font, textBrush, new PointF(textX, Height / 2f), sf);
-    }
-
-    private void HideTimer_Tick(object? sender, EventArgs e)
-    {
-        _hideTimer.Stop();
-        Hide();
+        // 居中文字
+        using var sf = new StringFormat { LineAlignment = StringAlignment.Center, Alignment = StringAlignment.Center };
+        using var font = new Font("Microsoft YaHei UI", 16f, FontStyle.Regular, GraphicsUnit.Pixel);
+        using var tb = new SolidBrush(Color.FromArgb(240, 240, 245));
+        e.Graphics.DrawString(_text, font, tb, new RectangleF(0, 2, Width, Height), sf);
     }
 
     protected override bool ShowWithoutActivation => true;

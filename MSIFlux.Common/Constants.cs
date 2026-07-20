@@ -15,8 +15,12 @@ public static class EcRegs
     /// <summary>热键调试模式控制: bit7=1 开启</summary>
     public const byte HotkeyCtrl  = 0xC1;
 
-    /// <summary>WMI ACPI / Direct EC LED 控制寄存器列表 (麦克风静音/静音指示灯)</summary>
-    public static readonly byte[] LedRegs = { 0x2C, 0x2E, 0x2D, 0x2F, 0xD8, 0xD9, 0xDA, 0x2A, 0x2B, 0xF4 };
+    /// <summary>WMI ACPI / Direct EC LED 控制寄存器 (来自 MSI Feature Manager 逆向)
+    /// Mic Mute LED (F5): 逻辑地址 44, bit 1
+    /// Audio Mute LED (F1): 逻辑地址 45, bit 1</summary>
+    public const byte LedRegMic   = 44;   // 0x2C
+    public const byte LedRegAudio = 45;   // 0x2D
+    public static readonly byte[] LedRegs = { LedRegMic, LedRegAudio };
 }
 
 /// <summary>Fn 热键 EC 编码 → 名称映射 (来自 BabaConsole 真机逆向 + MSI 官方热键表)</summary>

@@ -1538,81 +1538,46 @@ internal sealed partial class FanControlService : ServiceBase
 
     private void WmiSetLed(bool isMic, bool on)
     {
-        int moCount = 0, okCount = 0;
+        // 通过 MSI_ACPI WMI 接口控制 Fn 键 LED (绝影14 验证通过)
+        //   Mic  Mute LED (F5): WMI 地址 44, bit 1
+        //   Audio Mute LED (F1): WMI 地址 45, bit 1
+        byte wmiAddr = isMic ? (byte)44 : (byte)45;
+        string label = isMic ? "Mic(F5)" : "Audio(F1)";
 
-        // 1. 确定硬件 EC LED 寄存器:
-        // 0x2C / 0xD8 / 0x3A 是 Audio Mute (F1) LED
-        // 0x2E / 0xD9 / 0x3B 是 Mic Mute (F5) LED
-        byte[] targetRegs = isMic ? new byte[] { 0x2E, 0xD9, 0x3B, 0x2D, 0x2F } : new byte[] { 0x2C, 0xD8, 0x3A, 0x2A, 0x2B };
-
-        try
-        {
-            // 解锁微星 EC[0xC1] 热键/LED 控制接管位 (Bit7=1)
-            byte origC1 = 0;
-            bool hasC1 = _EC.ReadByte(0xC1, out origC1);
-            if (hasC1)
-            {
-                _EC.WriteByte(0xC1, (byte)(origC1 | 0x80));
-            }
-
-            foreach (byte reg in targetRegs)
-            {
-                if (_EC.ReadByte(reg, out byte curVal))
-                {
-                    // 设置为 0x01 / 0x80 高电平点亮，0x00 熄灭
-                    byte next = on ? (byte)(curVal | 0x01 | 0x80) : (byte)(curVal & ~0x01 & ~0x80);
-                    _EC.WriteByte(reg, next);
-                    okCount++;
-                }
-            }
-
-            // 还原 EC[0xC1]
-            if (hasC1)
-            {
-                _EC.WriteByte(0xC1, origC1);
-            }
-        }
-        catch { }
-
-        // 2. WMI ACPI 辅助控制
         try
         {
             using var searcher = new System.Management.ManagementObjectSearcher(
                 @"root\wmi", "SELECT * FROM MSI_ACPI");
             foreach (System.Management.ManagementObject mo in searcher.Get())
             {
-                moCount = 1;
-                foreach (byte reg in targetRegs)
-                {
-                    try
-                    {
-                        var rPkg = new System.Management.ManagementClass(@"root\wmi:Package_32", null).CreateInstance();
-                        var rBuf = new byte[32]; rBuf[0] = reg;
-                        rPkg["Bytes"] = rBuf;
-                        var rIn = mo.GetMethodParameters("Get_Data"); rIn["Data"] = rPkg;
-                        var rOut = mo.InvokeMethod("Get_Data", rIn, null);
-                        byte curVal = 0;
-                        if (rOut?["Data"] is System.Management.ManagementBaseObject rObj)
-                            foreach (System.Management.PropertyData pd in rObj.Properties)
-                                if (pd.IsArray && pd.Value is byte[] r && r.Length > 1) { curVal = r[1]; break; }
+                // 读当前值
+                var rPkg = new System.Management.ManagementClass(@"root\wmi:Package_32", null).CreateInstance();
+                var rBuf = new byte[32]; rBuf[0] = wmiAddr;
+                rPkg["Bytes"] = rBuf;
+                var rIn = mo.GetMethodParameters("Get_Data"); rIn["Data"] = rPkg;
+                var rOut = mo.InvokeMethod("Get_Data", rIn, null);
+                byte curVal = 0;
+                if (rOut?["Data"] is System.Management.ManagementBaseObject rObj)
+                    foreach (System.Management.PropertyData pd in rObj.Properties)
+                        if (pd.IsArray && pd.Value is byte[] r && r.Length > 1) { curVal = r[1]; break; }
 
-                        byte next = on ? (byte)(curVal | 0x01 | 0x80) : (byte)(curVal & ~0x01 & ~0x80);
+                // 写新值: bit1 控制 LED
+                byte next = on ? (byte)(curVal | 0x02) : (byte)(curVal & ~0x02);
 
-                        var wPkg = new System.Management.ManagementClass(@"root\wmi:Package_32", null).CreateInstance();
-                        var wBuf = new byte[32]; wBuf[0] = reg; wBuf[1] = next;
-                        wPkg["Bytes"] = wBuf;
-                        var wIn = mo.GetMethodParameters("Set_Data"); wIn["Data"] = wPkg;
-                        mo.InvokeMethod("Set_Data", wIn, null);
-                    }
-                    catch { }
-                }
-                break;
+                var wPkg = new System.Management.ManagementClass(@"root\wmi:Package_32", null).CreateInstance();
+                var wBuf = new byte[32]; wBuf[0] = wmiAddr; wBuf[1] = next;
+                wPkg["Bytes"] = wBuf;
+                var wIn = mo.GetMethodParameters("Set_Data"); wIn["Data"] = wPkg;
+                mo.InvokeMethod("Set_Data", wIn, null);
+
+                Log.Info($"LED {label} -> {(on ? "ON" : "OFF")} (WMI 0x{wmiAddr:X2} bit1, 0x{curVal:X2}->0x{next:X2})");
+                return;
             }
+            Log.Warn($"LED {label}: MSI_ACPI 无实例");
         }
         catch (Exception ex)
         {
-            Log.Error($"WMI LED exception: {ex.Message}");
+            Log.Error($"LED {label} WMI 失败: {ex.GetType().Name} — {ex.Message}");
         }
-        Log.Info($"Direct EC / WMI LED: set {(isMic ? "Mic(F5)" : "Audio(F1)")} LED -> {(on ? "ON" : "OFF")}, ok={okCount}");
     }
 }
