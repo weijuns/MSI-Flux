@@ -123,13 +123,9 @@ internal sealed partial class FanControlService : ServiceBase
                 StringBuilder sb = new();
                 foreach (string svc in svcs)
                 {
-                    sb.Append($"- {svc}");
+                    sb.Append($"- {svc} ");
                 }
-
-                ExitCode = 1;
-                throw new InvalidOperationException(
-                    $"The following MSI Center services are running:\n{sb}\n" +
-                    "Uninstall MSI Center or disable the above services to use MSIFlux.");
+                Log.Warn($"检测到官方 MSI 服务在运行 ({sb})，请注意避免双重写入 EC。");
             }
 
             // Install WinRing0 to get EC access
