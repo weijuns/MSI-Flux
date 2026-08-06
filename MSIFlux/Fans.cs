@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.IO;
@@ -303,6 +303,12 @@ namespace MSIFlux.GUI
         {
             if (_config == null || _config.FanConfs == null) return;
 
+            int targetCurveIndex = _currentPerfMode;
+            if (targetCurveIndex < 0 || targetCurveIndex >= 4)
+            {
+                targetCurveIndex = 0;
+            }
+
             for (int fanIndex = 0; fanIndex < _config.FanConfs.Count && fanIndex < 2; fanIndex++)
             {
                 FanConf fanConf = _config.FanConfs[fanIndex];
@@ -311,13 +317,19 @@ namespace MSIFlux.GUI
                 bool isCPU = fanIndex == 0;
                 int expectedThresholds = fanConf.FanCurveRegs?.Length ?? 7;
 
-                fanConf.FanCurveConfs = new List<FanCurveConf>();
-
-                for (int curveIndex = 0; curveIndex < 4; curveIndex++)
+                if (fanConf.FanCurveConfs == null)
                 {
-                    var defaultCurve = CreateDefaultFanCurve(isCPU, curveIndex, expectedThresholds);
-                    fanConf.FanCurveConfs.Add(defaultCurve);
+                    fanConf.FanCurveConfs = new List<FanCurveConf>();
                 }
+
+                while (fanConf.FanCurveConfs.Count < 4)
+                {
+                    int indexToCreate = fanConf.FanCurveConfs.Count;
+                    fanConf.FanCurveConfs.Add(CreateDefaultFanCurve(isCPU, indexToCreate, expectedThresholds));
+                }
+
+                var defaultCurve = CreateDefaultFanCurve(isCPU, targetCurveIndex, expectedThresholds);
+                fanConf.FanCurveConfs[targetCurveIndex] = defaultCurve;
             }
         }
 
@@ -425,14 +437,24 @@ namespace MSIFlux.GUI
 
             bool tip = false;
 
-            HitTestResult hit = chart.HitTest(e.X, e.Y);
             Series series = chart.Series[0];
 
-            if (hit.Series is not null && hit.PointIndex >= 0)
+            if (!_isDraggingCurvePoint)
             {
-                curIndex = hit.PointIndex;
-                curPoint = hit.Series.Points[curIndex];
-                tip = true;
+                HitTestResult hit = chart.HitTest(e.X, e.Y);
+                if (hit.Series is not null && hit.PointIndex >= 0)
+                {
+                    curIndex = hit.PointIndex;
+                    curPoint = hit.Series.Points[curIndex];
+                    tip = true;
+                }
+            }
+            else
+            {
+                if (curPoint != null)
+                {
+                    tip = true;
+                }
             }
 
             if (curPoint != null)
@@ -444,11 +466,27 @@ namespace MSIFlux.GUI
                     dx = ax.PixelPositionToValue(e.X);
                     dy = ay.PixelPositionToValue(e.Y);
 
-                    if (dx < tempMin) dx = tempMin;
-                    if (dx > tempMax) dx = tempMax;
+                    double minX = tempMin;
+                    double maxX = tempMax;
+                    double minY = 0;
+                    double maxY = fansMax;
 
-                    if (dy < 0) dy = 0;
-                    if (dy > fansMax) dy = fansMax;
+                    if (curIndex > 0)
+                    {
+                        minX = series.Points[curIndex - 1].XValue;
+                        minY = series.Points[curIndex - 1].YValues[0];
+                    }
+                    if (curIndex < series.Points.Count - 1)
+                    {
+                        maxX = series.Points[curIndex + 1].XValue;
+                        maxY = series.Points[curIndex + 1].YValues[0];
+                    }
+
+                    if (dx < minX) dx = minX;
+                    if (dx > maxX) dx = maxX;
+
+                    if (dy < minY) dy = minY;
+                    if (dy > maxY) dy = maxY;
 
                     if (e.Button.HasFlag(MouseButtons.Left))
                     {
@@ -573,17 +611,17 @@ namespace MSIFlux.GUI
             };
 
             int[,] cpuProfiles = {
-                { 0, 0, 0, 45, 0, 25, 55, 0, 40, 65, 0, 55, 75, 0, 70, 85, 0, 85, 95, 0, 100 },
-                { 0, 0, 0, 50, 0, 20, 60, 0, 35, 70, 0, 50, 80, 0, 70, 90, 0, 85, 95, 0, 100 },
-                { 0, 0, 0, 45, 0, 25, 55, 0, 45, 65, 0, 60, 75, 0, 80, 85, 0, 100, 95, 0, 100 },
-                { 0, 0, 0, 40, 0, 30, 50, 0, 50, 60, 0, 70, 70, 0, 90, 80, 0, 110, 90, 0, 130 }
+                { 0, 0, 0, 45, 45, 0, 55, 55, 10, 70, 70, 15, 82, 82, 25, 90, 90, 45, 97, 97, 70 },
+                { 0, 0, 0, 38, 38, 10, 52, 52, 15, 70, 70, 20, 84, 84, 35, 92, 92, 60, 97, 97, 85 },
+                { 0, 0, 0, 30, 30, 15, 48, 48, 21, 69, 69, 25, 84, 84, 50, 92, 92, 79, 97, 97, 100 },
+                { 0, 0, 0, 30, 30, 25, 45, 45, 35, 65, 65, 50, 80, 80, 75, 90, 90, 100, 97, 97, 130 }
             };
 
             int[,] gpuProfiles = {
-                { 0, 0, 0, 50, 0, 20, 60, 0, 35, 70, 0, 50, 80, 0, 70, 90, 0, 85, 95, 0, 100 },
-                { 0, 0, 0, 55, 0, 25, 65, 0, 40, 75, 0, 55, 85, 0, 75, 92, 0, 90, 97, 0, 100 },
-                { 0, 0, 0, 45, 0, 25, 55, 0, 45, 65, 0, 65, 75, 0, 85, 85, 0, 110, 95, 0, 130 },
-                { 0, 0, 0, 40, 0, 35, 50, 0, 55, 60, 0, 75, 70, 0, 100, 80, 0, 125, 90, 0, 150 }
+                { 0, 0, 0, 50, 50, 0, 65, 65, 10, 78, 78, 15, 85, 85, 25, 90, 90, 40, 95, 95, 65 },
+                { 0, 0, 0, 42, 42, 8, 65, 65, 12, 78, 78, 20, 86, 86, 30, 92, 92, 55, 98, 98, 80 },
+                { 0, 0, 0, 38, 38, 10, 65, 65, 18, 78, 78, 29, 88, 88, 40, 93, 93, 75, 98, 98, 90 },
+                { 0, 0, 0, 35, 35, 18, 60, 60, 28, 72, 72, 45, 82, 82, 60, 90, 90, 90, 98, 98, 130 }
             };
 
             int[,] profile = isCPU ? cpuProfiles : gpuProfiles;

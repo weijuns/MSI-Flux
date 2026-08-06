@@ -680,26 +680,46 @@ internal sealed partial class FanControlService : ServiceBase
                 Log.Warn($"风扇 {cfg.Name} 曲线 {curveCfg.Name} 无阈值数据, 跳过");
                 continue;
             }
-            for (int j = 0; j < curveCfg.TempThresholds.Count; j++)
+
+            // 优先尝试 WMI ACPI 写入，以便提供最优平滑重载与滞后退档
+            bool wmiWritten = false;
+            try
             {
-                TempThreshold t = curveCfg.TempThresholds[j];
-                if (!LogECWriteByte(cfg.FanCurveRegs[j], t.FanSpeed))
+                wmiWritten = WmiWriteFanCurve(cfg.Name, curveCfg);
+            }
+            catch (Exception ex)
+            {
+                Log.Warn($"[WMI Fan] 风扇 {cfg.Name} 曲线通过 WMI 写入异常: {ex.Message}");
+            }
+
+            if (wmiWritten)
+            {
+                Log.Info($"[WMI Fan] 风扇 {cfg.Name} 曲线已通过 WMI 成功应用，跳过物理寄存器改写。");
+            }
+            else
+            {
+                Log.Info($"[WMI Fan] 无法通过 WMI 应用，正在回退到 Direct EC 物理寄存器改写...");
+                for (int j = 0; j < curveCfg.TempThresholds.Count; j++)
                 {
-                    success = false;
-                }
-                if (j > 0)
-                {
-                    if (!LogECWriteByte(cfg.UpThresholdRegs[j - 1], t.UpThreshold))
+                    TempThreshold t = curveCfg.TempThresholds[j];
+                    if (!LogECWriteByte(cfg.FanCurveRegs[j], t.FanSpeed))
                     {
                         success = false;
                     }
-                    byte downT = Config.OffsetDT
-                        ? (byte)(t.UpThreshold - t.DownThreshold)
-                        : t.DownThreshold;
-
-                    if (!LogECWriteByte(cfg.DownThresholdRegs[j - 1], downT))
+                    if (j > 0)
                     {
-                        success = false;
+                        if (!LogECWriteByte(cfg.UpThresholdRegs[j - 1], t.UpThreshold))
+                        {
+                            success = false;
+                        }
+                        byte downT = Config.OffsetDT
+                            ? (byte)(t.UpThreshold - t.DownThreshold)
+                            : t.DownThreshold;
+
+                        if (!LogECWriteByte(cfg.DownThresholdRegs[j - 1], downT))
+                        {
+                            success = false;
+                        }
                     }
                 }
             }
@@ -1579,5 +1599,205 @@ internal sealed partial class FanControlService : ServiceBase
         {
             Log.Error($"LED {label} WMI 失败: {ex.GetType().Name} — {ex.Message}");
         }
+    }
+
+    private byte[] WmiGetAcpiBytes(string methodName, byte parameter)
+    {
+        try
+        {
+            string[] wmiClasses = new string[] { "MSI_ACPI", "MSI_ACPI2" };
+            foreach (var cls in wmiClasses)
+            {
+                using var searcher = new System.Management.ManagementObjectSearcher(@"root\wmi", $"SELECT * FROM {cls}");
+                var list = searcher.Get();
+                if (list == null || list.Count == 0) continue;
+                foreach (System.Management.ManagementObject mo in list)
+                {
+                    var pkg = new System.Management.ManagementClass($"root\\wmi:Package_32", null).CreateInstance();
+                    var buf = new byte[32];
+                    buf[0] = parameter;
+                    pkg["Bytes"] = buf;
+                    
+                    var inParams = mo.GetMethodParameters(methodName);
+                    inParams["Data"] = pkg;
+                    var outParams = mo.InvokeMethod(methodName, inParams, null);
+                    if (outParams?["Data"] is System.Management.ManagementBaseObject outObj)
+                    {
+                        foreach (System.Management.PropertyData pd in outObj.Properties)
+                        {
+                            if (pd.IsArray && pd.Value is byte[] result)
+                            {
+                                return result;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Warn($"WmiGetAcpiBytes {methodName}({parameter}) 失败: {ex.Message}");
+        }
+        return null;
+    }
+
+    private bool WmiSetAcpiBytes(string methodName, byte parameter, byte[] data)
+    {
+        try
+        {
+            string[] wmiClasses = new string[] { "MSI_ACPI", "MSI_ACPI2" };
+            bool success = false;
+            foreach (var cls in wmiClasses)
+            {
+                using var searcher = new System.Management.ManagementObjectSearcher(@"root\wmi", $"SELECT * FROM {cls}");
+                var list = searcher.Get();
+                if (list == null || list.Count == 0) continue;
+                
+                foreach (System.Management.ManagementObject mo in list)
+                {
+                    var pkg = new System.Management.ManagementClass($"root\\wmi:Package_32", null).CreateInstance();
+                    var buf = new byte[32];
+                    buf[0] = parameter;
+                    if (data != null)
+                    {
+                        int len = Math.Min(data.Length, buf.Length - 1);
+                        Array.Copy(data, 0, buf, 1, len);
+                    }
+                    pkg["Bytes"] = buf;
+                    
+                    var inParams = mo.GetMethodParameters(methodName);
+                    inParams["Data"] = pkg;
+                    
+                    mo.InvokeMethod(methodName, inParams, null);
+                    success = true;
+                }
+            }
+            return success;
+        }
+        catch (Exception ex)
+        {
+            Log.Error($"WmiSetAcpiBytes {methodName}({parameter}) 失败: {ex.Message}");
+            return false;
+        }
+    }
+
+    private bool WmiWriteFanCurve(string fanName, FanCurveConf curveCfg)
+    {
+        bool isGpu = fanName.Contains("GPU", StringComparison.OrdinalIgnoreCase);
+        byte fanId = (byte)(isGpu ? 2 : 1);
+
+        Log.Info($"[WMI Fan] 尝试通过 WMI ACPI 写入风扇 {fanName} 曲线...");
+
+        if (curveCfg.TempThresholds == null || curveCfg.TempThresholds.Count == 0)
+        {
+            Log.Warn($"[WMI Fan] 风扇 {fanName} 无可用曲线阈值数据");
+            return false;
+        }
+
+        try
+        {
+            byte thermalLimit = 85;
+            byte controlByte = 0;
+            
+            byte[] existingTemps = WmiGetAcpiBytes("Get_Temperature", fanId);
+            if (existingTemps != null && existingTemps.Length > 2)
+            {
+                thermalLimit = existingTemps[2];
+            }
+
+            byte[] existingFan = WmiGetAcpiBytes("Get_Fan", fanId);
+            if (existingFan != null && existingFan.Length > 1)
+            {
+                controlByte = existingFan[1];
+            }
+
+            // 构造 DisplayTemps (7 个点)
+            byte[] displayTemps = new byte[7];
+            for (int k = 0; k < 7; k++)
+            {
+                if (k < curveCfg.TempThresholds.Count)
+                {
+                    displayTemps[k] = (byte)curveCfg.TempThresholds[k].UpThreshold;
+                }
+                else
+                {
+                    displayTemps[k] = (byte)curveCfg.TempThresholds[curveCfg.TempThresholds.Count - 1].UpThreshold;
+                }
+            }
+
+            byte[] tempData = new byte[8];
+            tempData[0] = displayTemps[0];
+            tempData[1] = displayTemps[6];
+            tempData[2] = thermalLimit;
+            tempData[3] = displayTemps[1];
+            tempData[4] = displayTemps[2];
+            tempData[5] = displayTemps[3];
+            tempData[6] = displayTemps[4];
+            tempData[7] = displayTemps[5];
+
+            // 构造 Speeds (7 个点)
+            byte[] speeds = new byte[7];
+            for (int k = 0; k < 7; k++)
+            {
+                if (k < curveCfg.TempThresholds.Count)
+                {
+                    speeds[k] = (byte)curveCfg.TempThresholds[k].FanSpeed;
+                }
+                else
+                {
+                    speeds[k] = (byte)curveCfg.TempThresholds[curveCfg.TempThresholds.Count - 1].FanSpeed;
+                }
+            }
+            
+            byte[] fanData = new byte[8];
+            fanData[0] = controlByte;
+            Array.Copy(speeds, 0, fanData, 1, 7);
+
+            // 构造 Thermal (Offsets)
+            byte throttleTemp = 90;
+            byte[] existingThermal = WmiGetAcpiBytes("Get_Thermal", fanId);
+            if (existingThermal != null && existingThermal.Length > 1)
+            {
+                throttleTemp = existingThermal[1];
+            }
+            
+            byte[] offsets = new byte[6];
+            for (int k = 0; k < 6; k++)
+            {
+                // WMI Get_Thermal / Set_Thermal 使用的是绝对温度 DownThreshold
+                if (k < curveCfg.TempThresholds.Count)
+                {
+                    offsets[k] = (byte)curveCfg.TempThresholds[k].DownThreshold;
+                }
+                else
+                {
+                    offsets[k] = (byte)curveCfg.TempThresholds[curveCfg.TempThresholds.Count - 1].DownThreshold;
+                }
+            }
+            
+            byte[] thermalData = new byte[7];
+            thermalData[0] = throttleTemp;
+            Array.Copy(offsets, 0, thermalData, 1, 6);
+
+            // 调用 WMI
+            bool tOk = WmiSetAcpiBytes("Set_Temperature", fanId, tempData);
+            bool fOk = WmiSetAcpiBytes("Set_Fan", fanId, fanData);
+            bool thOk = WmiSetAcpiBytes("Set_Thermal", fanId, thermalData);
+
+            if (tOk && fOk && thOk)
+            {
+                Log.Info($"[WMI Fan] 成功通过 WMI ACPI 应用风扇 {fanName} 曲线及滞后偏置，thermalLimit={thermalLimit}, controlByte=0x{controlByte:X2}, throttleTemp={throttleTemp}");
+                return true;
+            }
+            else
+            {
+                Log.Warn($"[WMI Fan] WMI 下发曲线失败，Set_Temp={tOk}, Set_Fan={fOk}, Set_Thermal={thOk}");
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Error($"[WMI Fan] WmiWriteFanCurve {fanName} 遇到异常: {ex.Message}");
+        }
+        return false;
     }
 }

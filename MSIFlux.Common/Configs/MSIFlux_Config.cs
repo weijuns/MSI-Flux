@@ -1,4 +1,4 @@
-﻿// This file is part of MSIFlux, based on YAMDCC.
+// This file is part of MSIFlux, based on YAMDCC.
 // Original Copyright © 2023-2025 Sparronator9999
 // Modifications Copyright © 2026 weijuns.
 //
@@ -99,7 +99,7 @@ public sealed class MSIFlux_Config
     /// (Vector 16 HX AI A2XWIG), and possibly more released in 2025 or later.
     /// </remarks>
     [XmlElement]
-    public bool OffsetDT { get; set; } = true;
+    public bool OffsetDT { get; set; } = false;
 
     /// <summary>
     /// The list of <see cref="FanConf"/>s associated with the laptop.

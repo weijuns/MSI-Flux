@@ -176,6 +176,17 @@ Write flow: `EC.WriteByte(Reg, Value)` → WinRing0 driver → EC hardware → B
 
 ---
 
+## 📅 Changelog
+
+### v1.5.0 (2026-08-06)
+- 🌀 **Refactored Fan Temp Cooldown & Dropdown Mechanism**: Fixed the hardware cooling bug on Stealth 14 / newer MSI models where fans wouldn't drop speeds when temps cooled down. Defaulted `<OffsetDT>` to `false` (meaning absolute temperature registers), locking the WMI and Direct EC write payloads to absolute temperatures.
+- ⚖️ **Multi-Profile Fan Speed Gradient**: Re-designed default curve curves for Battery, Silent, and Extreme modes. Wind noise levels are now strictly categorized in a monotonic order: Battery < Silent < Balanced (MSI Factory) < Extreme.
+- 🔒 **Interactive Coordinate Drag Lock**: Implemented an Active Drag Target lock inside the fan curve chart to prevent mouse moves from accidentally switching active drag targets due to HitTest crossovers. Added adjacent bounds checks to both X and Y axes to enforce absolute monotonicity and prevent point overlapping.
+- 🎯 **Fine-grained Reset Control**: Rewrote the "Default" reset button behavior to only restore factory defaults for the currently active performance mode profile, preserving custom configurations in all other modes.
+- 📦 **Version Bump**: Bumped version to v1.5.0 across the projects and packed a standalone ~20MB trimmed self-contained executable.
+
+---
+
 ## 📥 Download & Installation
 
 ### Prerequisites
