@@ -37,6 +37,13 @@ internal sealed class HotkeyHook : IDisposable
             r.SetMicMuteLed(_micMutedState);
             OsdToastForm.ShowToast(_micMutedState ? "麦克风已禁用" : "麦克风已启用");
         }),
+        [0x0040] = ("Fn+F6 摄像头", r => {
+            if (_dedup.Add(8787))
+            {
+                Task.Delay(500).ContinueWith(_ => _dedup.Remove(8787));
+                ToggleCamOsd();
+            }
+        }),
     };
     // VK 码 → 动作
     private static readonly Dictionary<uint, (string, Action<FanControlRunner>)> VkMap = new()
@@ -46,6 +53,13 @@ internal sealed class HotkeyHook : IDisposable
             try { AudioStateController.ToggleSpeakerMute(); } catch { }
             r.SetAudioMuteLed(_audioMutedState);
             OsdToastForm.ShowToast(_audioMutedState ? "静音" : "取消静音");
+        }),
+        [0x75] = ("Fn+F6 摄像头", r => {
+            if (_dedup.Add(8787))
+            {
+                Task.Delay(500).ContinueWith(_ => _dedup.Remove(8787));
+                ToggleCamOsd();
+            }
         }),
     };
     #endregion
