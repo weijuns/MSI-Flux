@@ -29,6 +29,7 @@ public static class HotkeyCodes
     public static readonly Dictionary<int, string> Map = new()
     {
         [118] = "Fn+F7",  // 情景模式
+        [87]  = "Fn+F6",  // 摄像头开关
         [38]  = "Fn+↑",   // Cooler Boost 强冷
         [119] = "Fn+F8",  // 键盘背光
         [27]  = "Fn+Esc", // Fn Lock

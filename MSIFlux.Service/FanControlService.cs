@@ -92,12 +92,9 @@ internal sealed partial class FanControlService : ServiceBase
         _EC = new EC();
 
         PipeSecurity security = new();
-        // use SDDL descriptor since not everyone uses english Windows.
-        // the SDDL descriptor should be roughly equivalent to the old
-        // behaviour (commented out below):
-        // security.AddAccessRule(new PipeAccessRule(
-        //     "Administrators", PipeAccessRights.ReadWrite, AccessControlType.Allow));
-        security.SetSecurityDescriptorSddlForm("O:BAG:SYD:(A;;GA;;;SY)(A;;GRGW;;;BA)");
+        // 设置 IPC 管道 SDDL 权限: 允许 SYSTEM (SY)、管理员 (BA) 和普通已登录用户 (AU) 读写管道
+        // 彻底解决普通用户双击打开 GUI 时连接管道被拒绝 (Access Denied) 的问题
+        security.SetSecurityDescriptorSddlForm("O:BAG:SYD:(A;;GA;;;SY)(A;;GA;;;BA)(A;;GRGW;;;AU)");
 
         CooldownTimer.Elapsed += new ElapsedEventHandler(CooldownElapsed);
         // HotkeyPollElapsed is now called from a Task loop in StartHotkeyPoller()
@@ -128,23 +125,23 @@ internal sealed partial class FanControlService : ServiceBase
                 Log.Warn($"检测到官方 MSI 服务在运行 ({sb})，请注意避免双重写入 EC。");
             }
 
-            // Install WinRing0 to get EC access
+            // Install WinRing0 to get EC access (软加载: 被杀软拦截时降级走 WMI ACPI, 不抛异常崩服务)
             try
             {
                 Log.Info(Strings.GetString("drvLoad"));
                 if (!_EC.LoadDriver())
                 {
-                    throw new Win32Exception(_EC.GetDriverError());
+                    Log.Warn("WinRing0 驱动加载受阻 (可能被杀软拦截或无硬件访问权限)。系统将自动降级为 WMI ACPI 模式运行。");
+                }
+                else
+                {
+                    Log.Info(Strings.GetString("drvLoadSuccess"));
                 }
             }
-            catch (Win32Exception)
+            catch (Exception ex)
             {
-                Log.Fatal(Strings.GetString("drvLoadFail"));
-                _EC.UnloadDriver();
-                ExitCode = 1;
-                throw;
+                Log.Warn($"WinRing0 驱动加载异常 ({ex.Message})。系统将自动降级为 WMI ACPI 模式运行。");
             }
-            Log.Info(Strings.GetString("drvLoadSuccess"));
 
             // Load the last applied MSIFlux config.
             bool confLoaded = LoadConf();
@@ -1207,6 +1204,13 @@ internal sealed partial class FanControlService : ServiceBase
             string cls = e.NewEvent.ClassPath?.ClassName ?? "?";
             Log.Info($"WMI 热键事件: {cls}, 数值=[{string.Join(",", nums)}]");
 
+            // 检测 Fn+F6 (code=87) → 摄像头
+            if (nums.Contains(87))
+            {
+                Log.Info("WMI 热键: Fn+F6 (87) → 摄像头切换");
+                IPCServer.PushMessage(new ServiceResponse(Response.CamToggled), -1);
+            }
+
             // 检测 Fn+F7 (code=118)
             if (nums.Contains(118))
             {
@@ -1436,6 +1440,11 @@ internal sealed partial class FanControlService : ServiceBase
 
             switch (code)
             {
+                case 87: // Fn+F6 → 摄像头: 通知 GUI 显示 OSD
+                    Log.Info($"Fn 热键: 0x{code:X2} → {name} → 摄像头切换");
+                    IPCServer.PushMessage(new ServiceResponse(Response.CamToggled), -1);
+                    break;
+
                 case 118: // Fn+F7 → 场景模式: 服务端直接循环切换
                     Log.Info($"Fn 热键: 0x{code:X2} → {name} → 执行性能模式切换");
                     try
@@ -1558,46 +1567,83 @@ internal sealed partial class FanControlService : ServiceBase
 
     private void WmiSetLed(bool isMic, bool on)
     {
-        // 通过 MSI_ACPI WMI 接口控制 Fn 键 LED (绝影14 验证通过)
-        //   Mic  Mute LED (F5): WMI 地址 44, bit 1
-        //   Audio Mute LED (F1): WMI 地址 45, bit 1
+        // 控制 F1 (主音量静音) 与 F5 (麦克风禁用) 物理按键指示灯:
+        //   Mic  Mute LED (F5): 逻辑/EC 地址 44 (0x2C), bit 1 (0x02 亮, 0x00 灭)
+        //   Audio Mute LED (F1): 逻辑/EC 地址 45 (0x2D), bit 1 (0x02 亮, 0x00 灭)
         byte wmiAddr = isMic ? (byte)44 : (byte)45;
         string label = isMic ? "Mic(F5)" : "Audio(F1)";
 
+        bool wmiSuccess = false;
+
+        // 1. 优先尝试 WMI ACPI (支持 MSI_ACPI 与 MSI_ACPI2)
         try
         {
-            using var searcher = new System.Management.ManagementObjectSearcher(
-                @"root\wmi", "SELECT * FROM MSI_ACPI");
-            foreach (System.Management.ManagementObject mo in searcher.Get())
+            string[] wmiClasses = new string[] { "MSI_ACPI", "MSI_ACPI2" };
+            foreach (var cls in wmiClasses)
             {
-                // 读当前值
-                var rPkg = new System.Management.ManagementClass(@"root\wmi:Package_32", null).CreateInstance();
-                var rBuf = new byte[32]; rBuf[0] = wmiAddr;
-                rPkg["Bytes"] = rBuf;
-                var rIn = mo.GetMethodParameters("Get_Data"); rIn["Data"] = rPkg;
-                var rOut = mo.InvokeMethod("Get_Data", rIn, null);
-                byte curVal = 0;
-                if (rOut?["Data"] is System.Management.ManagementBaseObject rObj)
-                    foreach (System.Management.PropertyData pd in rObj.Properties)
-                        if (pd.IsArray && pd.Value is byte[] r && r.Length > 1) { curVal = r[1]; break; }
+                using var searcher = new System.Management.ManagementObjectSearcher(
+                    @"root\wmi", $"SELECT * FROM {cls}");
+                var list = searcher.Get();
+                if (list == null || list.Count == 0) continue;
 
-                // 写新值: bit1 控制 LED
-                byte next = on ? (byte)(curVal | 0x02) : (byte)(curVal & ~0x02);
+                foreach (System.Management.ManagementObject mo in list)
+                {
+                    var rPkg = new System.Management.ManagementClass(@"root\wmi:Package_32", null).CreateInstance();
+                    var rBuf = new byte[32]; rBuf[0] = wmiAddr;
+                    rPkg["Bytes"] = rBuf;
+                    var rIn = mo.GetMethodParameters("Get_Data"); rIn["Data"] = rPkg;
+                    var rOut = mo.InvokeMethod("Get_Data", rIn, null);
+                    byte curVal = 0;
+                    if (rOut?["Data"] is System.Management.ManagementBaseObject rObj)
+                        foreach (System.Management.PropertyData pd in rObj.Properties)
+                            if (pd.IsArray && pd.Value is byte[] r && r.Length > 1) { curVal = r[1]; break; }
 
-                var wPkg = new System.Management.ManagementClass(@"root\wmi:Package_32", null).CreateInstance();
-                var wBuf = new byte[32]; wBuf[0] = wmiAddr; wBuf[1] = next;
-                wPkg["Bytes"] = wBuf;
-                var wIn = mo.GetMethodParameters("Set_Data"); wIn["Data"] = wPkg;
-                mo.InvokeMethod("Set_Data", wIn, null);
+                    byte next = on ? (byte)(curVal | 0x02) : (byte)(curVal & ~0x02);
 
-                Log.Info($"LED {label} -> {(on ? "ON" : "OFF")} (WMI 0x{wmiAddr:X2} bit1, 0x{curVal:X2}->0x{next:X2})");
-                return;
+                    var wPkg = new System.Management.ManagementClass(@"root\wmi:Package_32", null).CreateInstance();
+                    var wBuf = new byte[32]; wBuf[0] = wmiAddr; wBuf[1] = next;
+                    wPkg["Bytes"] = wBuf;
+                    var wIn = mo.GetMethodParameters("Set_Data"); wIn["Data"] = wPkg;
+                    mo.InvokeMethod("Set_Data", wIn, null);
+
+                    Log.Info($"LED {label} -> {(on ? "ON" : "OFF")} via WMI {cls} (0x{wmiAddr:X2} bit1, 0x{curVal:X2}->0x{next:X2})");
+                    wmiSuccess = true;
+                    break;
+                }
+                if (wmiSuccess) break;
             }
-            Log.Warn($"LED {label}: MSI_ACPI 无实例");
         }
         catch (Exception ex)
         {
-            Log.Error($"LED {label} WMI 失败: {ex.GetType().Name} — {ex.Message}");
+            Log.Warn($"LED {label} WMI 控制未成功 ({ex.Message})，准备回退到 Direct EC 改写...");
+        }
+
+        // 2. 若 WMI 不可用或类不存在（ManagementException - 无效类），自动回退到 Direct EC 物理寄存器改写
+        if (!wmiSuccess)
+        {
+            try
+            {
+                if (_EC.ReadByte(wmiAddr, out byte ecVal))
+                {
+                    byte nextEc = on ? (byte)(ecVal | 0x02) : (byte)(ecVal & ~0x02);
+                    if (_EC.WriteByte(wmiAddr, nextEc))
+                    {
+                        Log.Info($"LED {label} -> {(on ? "ON" : "OFF")} via Direct EC (0x{wmiAddr:X2} bit1, 0x{ecVal:X2}->0x{nextEc:X2})");
+                        return;
+                    }
+                }
+
+                // 读失败时直接强改 0x02 / 0x00
+                byte directVal = on ? (byte)0x02 : (byte)0x00;
+                if (_EC.WriteByte(wmiAddr, directVal))
+                {
+                    Log.Info($"LED {label} -> {(on ? "ON" : "OFF")} via Direct EC 强制写入 0x{wmiAddr:X2}=0x{directVal:X2}");
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"LED {label} Direct EC 改写异常: {ex.Message}");
+            }
         }
     }
 

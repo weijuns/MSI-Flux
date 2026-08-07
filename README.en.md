@@ -178,6 +178,12 @@ Write flow: `EC.WriteByte(Reg, Value)` → WinRing0 driver → EC hardware → B
 
 ## 📅 Changelog
 
+### v1.6.0 (2026-08-07)
+- 🛡️ **Service SDDL Authorization & Seamless Double-click Self-healing**: Resolved the issue where double-clicking under standard user rights prompted "Service Not Running". Granted full `CCLCSWRPWPDTLOCRRC` start and control permissions to `Authenticated Users` (`AU`) via `sc.exe sdset` with quotes validation and retry routines.
+- 💡 **Physical Key LED Direct EC Fallback**: Refactored F1 (Audio Mute) and F5 (Mic Mute) LED controls. In addition to `MSI_ACPI` / `MSI_ACPI2` WMI polling, introduced direct bit manipulation on EC physical registers `0x2C` (Mic) and `0x2D` (Audio) so physical LEDs light up cleanly even without official WMI drivers.
+- 📷 **Zero-CPU Native F6 Camera OSD**: Replaced CPU polling and unreliable WMI `MSI_Event` with Windows kernel-level device interface notification (`RegisterDeviceNotification` + `WM_DEVICECHANGE` for `KSCATEGORY_VIDEO_CAMERA`). Toggling the physical camera triggers instant OS device notifications, powering 0% CPU Toast animations.
+- ⚙️ **Auto Directory Initialization & Graceful Degradation**: Auto-creates `C:\ProgramData\MSI Flux\Config` on early startup to ensure zero-crash clean installs on fresh machines; degraded `WinRing0` driver loading errors to soft warnings that gracefully fall back to WMI ACPI mode if blocked by antivirus software.
+
 ### v1.5.0 (2026-08-06)
 - 🌀 **Refactored Fan Temp Cooldown & Dropdown Mechanism**: Fixed the hardware cooling bug on Stealth 14 / newer MSI models where fans wouldn't drop speeds when temps cooled down. Defaulted `<OffsetDT>` to `false` (meaning absolute temperature registers), locking the WMI and Direct EC write payloads to absolute temperatures.
 - ⚖️ **Multi-Profile Fan Speed Gradient**: Re-designed default curve curves for Battery, Silent, and Extreme modes. Wind noise levels are now strictly categorized in a monotonic order: Battery < Silent < Balanced (MSI Factory) < Extreme.

@@ -135,6 +135,16 @@ public enum Response
     /// </para>
     /// </remarks>
     GpuModeResult,
+    /// <summary>
+    /// Sent to all connected clients when the service detects
+    /// an Fn+F6 camera toggle (from EC polling or WMI event).
+    /// </summary>
+    /// <remarks>
+    /// <para>This response's <see cref="ServiceResponse.Value"/> field includes
+    /// the following data as a <see langword="bool"/>:<br/>
+    /// • Disabled: true if the camera was disabled, false if enabled.</para>
+    /// </remarks>
+    CamToggled,
 }
 
 /// <summary>

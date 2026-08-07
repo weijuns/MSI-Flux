@@ -277,6 +277,9 @@ namespace MSIFlux.GUI
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
 
+            // 确保配置目录与默认配置文件存在
+            Paths.EnsureCurrentConfigExists();
+
             Extra.ApplySavedLanguage();
 
             // 自动装载高精度定时器设置 (0.5ms)
@@ -460,6 +463,22 @@ namespace MSIFlux.GUI
                         "检测到 MSI Flux 已被移动到新位置. 需要重新安装后台服务才能正常工作.\n\n" +
                         "是否立即重新安装?",
                         "MSI Flux", MessageBoxButtons.OKCancel, MessageBoxIcon.Warning);
+                    if (ans == DialogResult.OK)
+                    {
+                        ServiceManager.RelaunchElevated("--install-service");
+                    }
+                }
+            }
+            else if (!ServiceManager.HasNonAdminStartPermission())
+            {
+                // 服务已装且路径正确, 但 SDDL 权限不对.
+                // 普通用户双击 exe 时无法启动服务 (SCM 返回 拒绝访问).
+                if (!silent)
+                {
+                    var ans = MessageBox.Show(
+                        "检测到后台服务的权限配置不完整 (普通用户无启动权限).\n\n" +
+                        "这会导致非管理员身份运行时无法启动服务. 是否立即修复?",
+                        "MSI Flux - 权限修复", MessageBoxButtons.OKCancel, MessageBoxIcon.Warning);
                     if (ans == DialogResult.OK)
                     {
                         ServiceManager.RelaunchElevated("--install-service");

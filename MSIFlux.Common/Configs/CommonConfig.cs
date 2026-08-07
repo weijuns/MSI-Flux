@@ -279,6 +279,16 @@ public sealed class CommonConfig
         XmlSerializer serialiser = new(typeof(CommonConfig));
         try
         {
+            if (!File.Exists(Paths.GlobalConf))
+            {
+                var newCfg = new CommonConfig();
+                lock (_instanceLock)
+                {
+                    _instance = newCfg;
+                }
+                return newCfg;
+            }
+
             using (XmlReader reader = XmlReader.Create(Paths.GlobalConf))
             {
                 CommonConfig cfg = (CommonConfig)serialiser.Deserialize(reader);
@@ -296,6 +306,8 @@ public sealed class CommonConfig
         catch (Exception ex)
         {
             if (ex is FileNotFoundException
+                or DirectoryNotFoundException
+                or IOException
                 or InvalidOperationException
                 or InvalidConfigException)
             {
@@ -319,6 +331,15 @@ public sealed class CommonConfig
     /// <exception cref="InvalidOperationException"/>
     private void Save()
     {
+        try
+        {
+            if (!Directory.Exists(Paths.Data))
+            {
+                Directory.CreateDirectory(Paths.Data);
+            }
+        }
+        catch { }
+
         XmlSerializer serializer = new(typeof(CommonConfig));
         XmlWriterSettings settings = new()
         {

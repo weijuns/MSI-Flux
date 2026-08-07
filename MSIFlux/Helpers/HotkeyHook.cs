@@ -1,11 +1,12 @@
 // MSI Flux GUI — Fn 热键检测 (键盘钩子 → IPC → Service / WMI ACPI LED)
-// 摄像头状态监听 (Fn+F6 由 BIOS 处理, 我们只监控状态弹 OSD)
+// 摄像头状态监听 (Fn+F6 由 BIOS 处理, 通过 RegisterDeviceNotification 检测设备变化)
 
 using System.Diagnostics;
 using System.Management;
 using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Windows.Forms;
 
 namespace MSIFlux.GUI.Helpers;
 
@@ -20,7 +21,7 @@ internal sealed class HotkeyHook : IDisposable
     private IntPtr _hookId;
     private readonly FanControlRunner _runner;
     private readonly MSIFlux.Common.Logs.Logger? _log;
-    private readonly HashSet<uint> _dedup = new();
+    private static readonly HashSet<uint> _dedup = new();
     private bool _disposed;
 
     private static bool _audioMutedState = false;
@@ -70,9 +71,80 @@ internal sealed class HotkeyHook : IDisposable
         try { SendMessageW(GetForegroundWindow(), 0x0319, IntPtr.Zero, (IntPtr)0x180000); } catch { }
     }
 
-    // 摄像头状态: 通过 WMI MSI_Event 监听 Fn+F6 (事件码 87)
-    private ManagementEventWatcher? _camWatcher;
-    private bool _camDisabled;
+    // 摄像头: RegisterDeviceNotification 监听 KSCATEGORY_VIDEO_CAMERA 设备接口变化
+    // 当 BIOS 切换摄像头硬件时, USB 设备接口出现/消失, Windows 发送 WM_DEVICECHANGE → 立即弹 OSD
+    private CamDeviceWatcher? _camDevWatcher;
+    internal static bool CamDisabled;
+    internal static void ToggleCamOsd()
+    {
+        CamDisabled = !CamDisabled;
+        OsdToastForm.ShowToast(CamDisabled ? "摄像头已禁用" : "摄像头已启用");
+    }
+
+    // KSCATEGORY_VIDEO_CAMERA: {E5323777-F976-4F5B-9B55-B94699C46E44}
+    private static readonly Guid CamGuid = new(0xE5323777, 0xF976, 0x4F5B, 0x9B, 0x55, 0xB9, 0x46, 0x99, 0xC4, 0x6E, 0x44);
+
+    [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    private static extern IntPtr RegisterDeviceNotification(IntPtr hRecipient, ref DEV_BROADCAST_DEVICEINTERFACE filter, uint flags);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool UnregisterDeviceNotification(IntPtr handle);
+
+    private const uint DEVICE_NOTIFY_WINDOW_HANDLE = 0x00000000;
+    private const int WM_DEVICECHANGE = 0x0219;
+    private const int DBT_DEVTYP_DEVICEINTERFACE = 0x00000005;
+    private const int DBT_DEVICEARRIVAL = 0x8000;
+    private const int DBT_DEVICEREMOVECOMPLETE = 0x8004;
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    private struct DEV_BROADCAST_DEVICEINTERFACE
+    {
+        public uint dbcc_size;
+        public uint dbcc_devicetype;
+        public uint dbcc_reserved;
+        public Guid dbcc_classguid;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 1)]
+        public string dbcc_name;
+    }
+
+    private sealed class CamDeviceWatcher : NativeWindow, IDisposable
+    {
+        private IntPtr _notifyHandle;
+
+        public CamDeviceWatcher()
+        {
+            var cp = new CreateParams { Parent = IntPtr.Zero };
+            CreateHandle(cp);
+
+            var dbi = new DEV_BROADCAST_DEVICEINTERFACE
+            {
+                dbcc_size = (uint)Marshal.SizeOf<DEV_BROADCAST_DEVICEINTERFACE>(),
+                dbcc_devicetype = DBT_DEVTYP_DEVICEINTERFACE,
+                dbcc_classguid = CamGuid,
+            };
+            _notifyHandle = RegisterDeviceNotification(Handle, ref dbi, DEVICE_NOTIFY_WINDOW_HANDLE);
+        }
+
+        protected override void WndProc(ref Message m)
+        {
+            if (m.Msg == WM_DEVICECHANGE)
+            {
+                int evt = (int)m.WParam;
+                if (evt == DBT_DEVICEARRIVAL || evt == DBT_DEVICEREMOVECOMPLETE)
+                {
+                    CamDisabled = (evt == DBT_DEVICEREMOVECOMPLETE);
+                    OsdToastForm.ShowToast(CamDisabled ? "摄像头已禁用" : "摄像头已启用");
+                }
+            }
+            base.WndProc(ref m);
+        }
+
+        public void Dispose()
+        {
+            if (_notifyHandle != IntPtr.Zero) { UnregisterDeviceNotification(_notifyHandle); _notifyHandle = IntPtr.Zero; }
+            if (Handle != IntPtr.Zero) { DestroyHandle(); }
+        }
+    }
 
     [DllImport("user32.dll", SetLastError = true)]
     private static extern IntPtr SetWindowsHookEx(int idHook, LowLevelKeyboardProc lpfn, IntPtr hMod, uint tid);
@@ -99,8 +171,9 @@ internal sealed class HotkeyHook : IDisposable
             cp.MainModule != null ? GetModuleHandle(cp.MainModule.ModuleName) : IntPtr.Zero, 0);
         SafeLog(_hookId != IntPtr.Zero ? "Fn 热键已安装 (IPC LED)" : "Fn 热键失败");
 
-        // 启动 WMI 事件监听 (Fn+F6 摄像头等)
-        StartWmiEventWatcher();
+        // 启动摄像头设备变化监听 (RegisterDeviceNotification, 事件驱动, 零开销)
+        try { _camDevWatcher = new CamDeviceWatcher(); SafeLog("摄像头设备监听已启动 (RegisterDeviceNotification)"); }
+        catch (Exception ex) { SafeLog($"摄像头设备监听失败: {ex.Message}"); }
 
         // 启动时自动同步一次 F1 与 F5 的白色指示灯状态
         _ = Task.Run(() =>
@@ -161,42 +234,11 @@ internal sealed class HotkeyHook : IDisposable
         return CallNextHookEx(_hookId, nCode, wParam, lParam);
     }
 
-    // WMI MSI_Event 事件监听 (MSI 官方方式: Fn+F6 摄像头=87, 麦克风=25, 性能=29 等)
-    private void StartWmiEventWatcher()
-    {
-        try
-        {
-            var scope = new ManagementScope(@"root\wmi");
-            scope.Connect();
-            var query = new WqlEventQuery("SELECT * FROM MSI_Event");
-            _camWatcher = new ManagementEventWatcher(scope, query);
-            _camWatcher.EventArrived += (_, e) =>
-            {
-                try
-                {
-                    int code = 0;
-                    foreach (PropertyData p in e.NewEvent.Properties)
-                    {
-                        if (p.Name == "MSIEvt" && p.Value != null && int.TryParse(p.Value.ToString(), out int v))
-                        { code = v & 0xFF; break; }  // MSI 用 & 0xFF 提取事件码
-                    }
-
-                    const int Webcam = 87;       // WMIEventCode.Webcam
-                    if (code == Webcam)
-                    {
-                        _camDisabled = !_camDisabled;
-                        OsdToastForm.ShowToast(_camDisabled ? "摄像头已禁用" : "摄像头已启用");
-                    }
-                }
-                catch { }
-            };
-            _camWatcher.Start();
-            SafeLog("WMI MSI_Event 监听已启动 (摄像头 OSD)");
-        }
-        catch (Exception ex) { SafeLog($"WMI MSI_Event 监听失败: {ex.Message}"); }
-    }
-
     private void SafeLog(string msg) { try { _log?.Info(msg); } catch { Debug.WriteLine(msg); } }
     public void Dispose()
-    { if (_disposed) return; _disposed = true; _camWatcher?.Stop(); _camWatcher?.Dispose(); if (_hookId != IntPtr.Zero) { UnhookWindowsHookEx(_hookId); } }
+    {
+        if (_disposed) return; _disposed = true;
+        _camDevWatcher?.Dispose();
+        if (_hookId != IntPtr.Zero) { UnhookWindowsHookEx(_hookId); }
+    }
 }

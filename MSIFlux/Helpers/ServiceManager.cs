@@ -1,4 +1,4 @@
-﻿// This file is part of MSIFlux, based on YAMDCC.
+// This file is part of MSIFlux, based on YAMDCC.
 // Licensed under GPL-3.0-or-later.
 //
 // ServiceManager: 封装 Windows 服务的安装/卸载/启停/状态查询.
@@ -110,8 +110,7 @@ internal static class ServiceManager
         string? registered = GetRegisteredBinPath();
         if (string.IsNullOrEmpty(registered)) return false;
 
-        // ImagePath 通常形如: "C:\path\MSI Flux.exe" --service
-        // 取出第一段路径并 Trim 引号
+        // ImagePath 通常形如: "C:\path\MSI Flux.exe" --service 或 C:\path\MSI Flux.exe --service
         string path = registered.Trim();
         if (path.StartsWith("\""))
         {
@@ -120,8 +119,20 @@ internal static class ServiceManager
         }
         else
         {
-            int sp = path.IndexOf(' ');
-            if (sp > 0) path = path.Substring(0, sp);
+            // 防御空格路径截断 Bug: 如果无开头引号，按 " --" 参数分界或 ".exe" 截取，绝不按单个空格拆分
+            int svcIdx = path.IndexOf(" --", StringComparison.OrdinalIgnoreCase);
+            if (svcIdx > 0)
+            {
+                path = path.Substring(0, svcIdx).Trim('"').Trim();
+            }
+            else
+            {
+                int exeIdx = path.IndexOf(".exe", StringComparison.OrdinalIgnoreCase);
+                if (exeIdx > 0)
+                {
+                    path = path.Substring(0, exeIdx + 4).Trim('"').Trim();
+                }
+            }
         }
 
         try
@@ -165,6 +176,21 @@ internal static class ServiceManager
 
         // 设置描述 (失败不致命)
         RunSc($"description {ServiceName} {Quote(Description)}");
+
+        // 设置 SDDL 权限: 允许 Authenticated Users (AU) 拥有查询、启动、停止和控制权限 (SDDL 必须加双引号)
+        // 确保退出时服务关掉后，普通用户下次双击打开也能无需 UAC 提权直接启动服务
+        string sddl = "D:(A;;CCLCSWRPWPDTLOCRRC;;;SY)(A;;CCDCLCSWRPWPDTLOCRSDRCWDWO;;;BA)(A;;CCLCSWRPWPDTLOCRRC;;;AU)";
+        int sdCode = RunSc($"sdset {ServiceName} {Quote(sddl)}");
+        if (sdCode != 0)
+        {
+            Debug.WriteLine($"[ServiceManager] sc sdset 失败, 退出码 {sdCode}, 重试一次...");
+            Thread.Sleep(200);
+            sdCode = RunSc($"sdset {ServiceName} {Quote(sddl)}");
+            if (sdCode != 0)
+            {
+                Debug.WriteLine($"[ServiceManager] sc sdset 重试仍然失败, 退出码 {sdCode}");
+            }
+        }
 
         // 设置故障恢复策略: 连续 3 次失败后分别延时 60s/60s/120s 后重启
         RunSc($"failure {ServiceName} reset= 86400 actions= restart/60000/restart/60000/restart/120000");
@@ -260,6 +286,79 @@ internal static class ServiceManager
             Debug.WriteLine($"[ServiceManager] Stop 失败: {ex.Message}");
             return false;
         }
+    }
+
+    /// <summary>
+    /// 获取服务当前的 SDDL 字符串 (通过 sc sdshow).
+    /// 普通用户可查询, 失败返回 null.
+    /// </summary>
+    public static string? GetCurrentSddl()
+    {
+        try
+        {
+            var psi = new ProcessStartInfo
+            {
+                FileName = "sc.exe",
+                Arguments = $"sdshow {ServiceName}",
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+            };
+            using var proc = Process.Start(psi);
+            if (proc == null) return null;
+            string stdout = proc.StandardOutput.ReadToEnd().Trim();
+            proc.WaitForExit(5000);
+            if (proc.ExitCode != 0 || string.IsNullOrEmpty(stdout)) return null;
+
+            // sc sdshow 输出格式: "D:(...)" 一行
+            int dIdx = stdout.IndexOf("D:", StringComparison.Ordinal);
+            if (dIdx < 0) return null;
+            return stdout.Substring(dIdx);
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"[ServiceManager] GetCurrentSddl 失败: {ex.Message}");
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// 检查当前服务的 SDDL 是否允许 Authenticated Users (AU) 或
+    /// Interactive Users (IU) 启动/停止服务. 若缺少权限,
+    /// 普通用户双击 exe 时会无法启动服务.
+    /// </summary>
+    public static bool HasNonAdminStartPermission()
+    {
+        string? sddl = GetCurrentSddl();
+        if (string.IsNullOrEmpty(sddl)) return false;
+
+        // 检查 AU (Authenticated Users), IU (Interactive Users),
+        // WD (Everyone), BU (Built-in Users) 是否拥有 RP (SERVICE_START) 权限
+        // SDDL ACE 格式: (A;;权限字符串;;;SID)
+        string[] sids = { "AU", "IU", "WD", "BU" };
+        foreach (var sid in sids)
+        {
+            string sidPattern = ";;;" + sid + ")";
+            int pos = 0;
+            while (pos < sddl.Length)
+            {
+                int sidEnd = sddl.IndexOf(sidPattern, pos, StringComparison.Ordinal);
+                if (sidEnd < 0) break;
+
+                // 往前找到最近一个 ACE 起始 "(A;;"
+                int aceStart = sddl.LastIndexOf("(A;;", sidEnd, sidEnd, StringComparison.Ordinal);
+                if (aceStart < 0) { pos = sidEnd + 1; continue; }
+
+                // 权限字符串在 "(A;;" 之后, ";;;SID)" 之前
+                int rightsStart = aceStart + 4; // 跳过 "(A;;"
+                string rights = sddl.Substring(rightsStart, sidEnd - rightsStart);
+                if (rights.Contains("RP")) return true;
+
+                pos = sidEnd + 1;
+            }
+        }
+        return false;
     }
 
     /// <summary>

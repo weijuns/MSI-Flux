@@ -195,8 +195,10 @@ public sealed class FanControlRunner : IDisposable
 
     private void OnServerMessage(object? sender, ServiceResponse resp)
     {
-        // 留空. 当前 Service 只在响应时推消息; 未来若加 "主动推送"
-        // (例如温度变化广播), 可以在这里缓存结果省掉一次轮询.
+        if (resp.Response == Response.CamToggled)
+        {
+            try { HotkeyHook.ToggleCamOsd(); } catch { }
+        }
     }
 
     public void Stop()

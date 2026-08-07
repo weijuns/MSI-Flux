@@ -809,16 +809,12 @@ namespace MSIFlux.GUI
         {
             CloseAllChildForms();
 
+            // 完全遵循设计要求: 退出软件时停止并关闭后台系统服务，不留任何后台进程
             try
             {
                 if (Helpers.ServiceManager.IsRunning())
                 {
-                    // 直接尝试停止 (管理员或有权限的用户会成功)
-                    if (!Helpers.ServiceManager.Stop(TimeSpan.FromSeconds(5)))
-                    {
-                        // 权限不足, 提权停止
-                        Helpers.ServiceManager.RelaunchElevated("--stop-service");
-                    }
+                    Helpers.ServiceManager.Stop(TimeSpan.FromSeconds(5));
                 }
             }
             catch { }
