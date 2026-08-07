@@ -37,6 +37,13 @@ internal sealed class HotkeyHook : IDisposable
             r.SetMicMuteLed(_micMutedState);
             OsdToastForm.ShowToast(_micMutedState ? "麦克风已禁用" : "麦克风已启用");
         }),
+        [0x0040] = ("Fn+F6 摄像头", r => {
+            if (_dedup.Add(8787))
+            {
+                Task.Delay(500).ContinueWith(_ => _dedup.Remove(8787));
+                ToggleCamOsd();
+            }
+        }),
     };
     // VK 码 → 动作
     private static readonly Dictionary<uint, (string, Action<FanControlRunner>)> VkMap = new()
@@ -46,6 +53,13 @@ internal sealed class HotkeyHook : IDisposable
             try { AudioStateController.ToggleSpeakerMute(); } catch { }
             r.SetAudioMuteLed(_audioMutedState);
             OsdToastForm.ShowToast(_audioMutedState ? "静音" : "取消静音");
+        }),
+        [0x75] = ("Fn+F6 摄像头", r => {
+            if (_dedup.Add(8787))
+            {
+                Task.Delay(500).ContinueWith(_ => _dedup.Remove(8787));
+                ToggleCamOsd();
+            }
         }),
     };
     #endregion
@@ -91,6 +105,7 @@ internal sealed class HotkeyHook : IDisposable
     private static extern bool UnregisterDeviceNotification(IntPtr handle);
 
     private const uint DEVICE_NOTIFY_WINDOW_HANDLE = 0x00000000;
+    private const uint DEVICE_NOTIFY_ALL_INTERFACE_CLASSES = 0x00000004;
     private const int WM_DEVICECHANGE = 0x0219;
     private const int DBT_DEVTYP_DEVICEINTERFACE = 0x00000005;
     private const int DBT_DEVICEARRIVAL = 0x8000;
@@ -120,9 +135,10 @@ internal sealed class HotkeyHook : IDisposable
             {
                 dbcc_size = (uint)Marshal.SizeOf<DEV_BROADCAST_DEVICEINTERFACE>(),
                 dbcc_devicetype = DBT_DEVTYP_DEVICEINTERFACE,
-                dbcc_classguid = CamGuid,
+                dbcc_classguid = Guid.Empty,
             };
-            _notifyHandle = RegisterDeviceNotification(Handle, ref dbi, DEVICE_NOTIFY_WINDOW_HANDLE);
+            // 传入 DEVICE_NOTIFY_ALL_INTERFACE_CLASSES 确保捕获任意 USB 摄像头设备接口插拔通知
+            _notifyHandle = RegisterDeviceNotification(Handle, ref dbi, DEVICE_NOTIFY_WINDOW_HANDLE | DEVICE_NOTIFY_ALL_INTERFACE_CLASSES);
         }
 
         protected override void WndProc(ref Message m)
@@ -132,8 +148,12 @@ internal sealed class HotkeyHook : IDisposable
                 int evt = (int)m.WParam;
                 if (evt == DBT_DEVICEARRIVAL || evt == DBT_DEVICEREMOVECOMPLETE)
                 {
-                    CamDisabled = (evt == DBT_DEVICEREMOVECOMPLETE);
-                    OsdToastForm.ShowToast(CamDisabled ? "摄像头已禁用" : "摄像头已启用");
+                    if (_dedup.Add(8787))
+                    {
+                        Task.Delay(500).ContinueWith(_ => _dedup.Remove(8787));
+                        CamDisabled = (evt == DBT_DEVICEREMOVECOMPLETE);
+                        OsdToastForm.ShowToast(CamDisabled ? "摄像头已禁用" : "摄像头已启用");
+                    }
                 }
             }
             base.WndProc(ref m);
