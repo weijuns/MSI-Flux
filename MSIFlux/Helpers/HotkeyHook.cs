@@ -124,11 +124,14 @@ internal sealed class HotkeyHook : IDisposable
     private sealed class CamDeviceWatcher : NativeWindow, IDisposable
     {
         private IntPtr _notifyHandle;
+        public bool IsRegistered => _notifyHandle != IntPtr.Zero;
 
-        public CamDeviceWatcher()
+        public CamDeviceWatcher(Action<string> log)
         {
             var cp = new CreateParams { Parent = IntPtr.Zero };
             CreateHandle(cp);
+
+            log($"[摄像头] NativeWindow Handle=0x{Handle:X}");
 
             var dbi = new DEV_BROADCAST_DEVICEINTERFACE
             {
@@ -137,6 +140,16 @@ internal sealed class HotkeyHook : IDisposable
                 dbcc_classguid = CamGuid,
             };
             _notifyHandle = RegisterDeviceNotification(Handle, ref dbi, DEVICE_NOTIFY_WINDOW_HANDLE);
+
+            if (_notifyHandle == IntPtr.Zero)
+            {
+                int err = Marshal.GetLastWin32Error();
+                log($"[摄像头] RegisterDeviceNotification 失败, Win32 错误码: {err}");
+            }
+            else
+            {
+                log($"[摄像头] RegisterDeviceNotification 成功, NotifyHandle=0x{_notifyHandle:X}");
+            }
         }
 
         protected override void WndProc(ref Message m)
@@ -186,7 +199,12 @@ internal sealed class HotkeyHook : IDisposable
         SafeLog(_hookId != IntPtr.Zero ? "Fn 热键已安装 (IPC LED)" : "Fn 热键失败");
 
         // 启动摄像头设备变化监听 (RegisterDeviceNotification, 事件驱动, 零开销)
-        try { _camDevWatcher = new CamDeviceWatcher(); SafeLog("摄像头设备监听已启动 (RegisterDeviceNotification)"); }
+        try
+        {
+            _camDevWatcher = new CamDeviceWatcher(SafeLog);
+            if (!_camDevWatcher.IsRegistered)
+                SafeLog("摄像头 RegisterDeviceNotification 注册失败, F6 OSD 将不可用");
+        }
         catch (Exception ex) { SafeLog($"摄像头设备监听失败: {ex.Message}"); }
 
         // 启动时自动同步一次 F1 与 F5 的白色指示灯状态
