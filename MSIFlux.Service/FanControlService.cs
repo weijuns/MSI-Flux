@@ -709,9 +709,18 @@ internal sealed partial class FanControlService : ServiceBase
                         {
                             success = false;
                         }
-                        byte downT = Config.OffsetDT
-                            ? (byte)(t.UpThreshold - t.DownThreshold)
-                            : t.DownThreshold;
+                        byte downT;
+                        if (Config.OffsetDT)
+                        {
+                            int diff = t.UpThreshold - t.DownThreshold;
+                            downT = (diff > 0 && diff < 30) ? (byte)diff : (byte)4;
+                        }
+                        else
+                        {
+                            downT = (t.DownThreshold < t.UpThreshold && t.DownThreshold > 0)
+                                ? (byte)t.DownThreshold
+                                : (byte)Math.Max(0, t.UpThreshold - 4);
+                        }
 
                         if (!LogECWriteByte(cfg.DownThresholdRegs[j - 1], downT))
                         {
@@ -1810,14 +1819,20 @@ internal sealed partial class FanControlService : ServiceBase
             byte[] offsets = new byte[6];
             for (int k = 0; k < 6; k++)
             {
-                // WMI Get_Thermal / Set_Thermal 使用的是绝对温度 DownThreshold
-                if (k < curveCfg.TempThresholds.Count)
+                // WMI Get_Thermal / Set_Thermal 接口输入的是相对退档温差 Offset (如 4°C)
+                // BIOS 内部公式为: DownTemp = UpTemp - Offset
+                // 若传入 48°C 绝对温度，BIOS 会计算出 DownTemp = 48 - 48 = 0°C，导致风扇无法退档并误报高温狂转 5000+ RPM
+                int idx = k + 1; // 对应点 1 到 点 6
+                if (idx < curveCfg.TempThresholds.Count)
                 {
-                    offsets[k] = (byte)curveCfg.TempThresholds[k].DownThreshold;
+                    var t = curveCfg.TempThresholds[idx];
+                    int diff = t.UpThreshold - t.DownThreshold;
+                    byte offsetByte = (diff > 0 && diff < 30) ? (byte)diff : (byte)4;
+                    offsets[k] = offsetByte;
                 }
                 else
                 {
-                    offsets[k] = (byte)curveCfg.TempThresholds[curveCfg.TempThresholds.Count - 1].DownThreshold;
+                    offsets[k] = 4;
                 }
             }
             
