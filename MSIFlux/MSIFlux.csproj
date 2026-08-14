@@ -12,13 +12,14 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <PlatformTarget>AnyCPU</PlatformTarget>
     <AllowUnsafeBlocks>True</AllowUnsafeBlocks>
-    <!-- 版本号唯一数据源: 只改这里的 <Version> 即可, SDK 自动生成程序集版本特性 -->
-    <Version>1.6.2</Version>
-    <AssemblyVersion>1.6.2</AssemblyVersion>
-    <FileVersion>1.6.2</FileVersion>
-    <InformationalVersion>1.6.2</InformationalVersion>
+    <!-- 版本号唯一数据源: 只需修改这里的 <Version>, SDK 自动派生
+         AssemblyVersion / FileVersion / InformationalVersion,
+         主页 (SettingsForm) 与 About 对话框均从程序集版本动态读取. -->
+    <Version>1.6.3</Version>
+    <!-- FileVersion 默认派生为 <Version>.0 (如 1.6.3.0), 显式指定保持干净的 1.6.3 显示 -->
+    <FileVersion>1.6.3</FileVersion>
     <!-- 禁用 SDK 在 InformationalVersion 后自动附加 git commit hash (默认 true),
-         保证发布产物产品版本干净显示为 1.6.2 而非 1.6.2+<sha> -->
+         保证发布产物产品版本干净显示为 1.6.3 而非 1.6.3+<sha> -->
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
     <RootNamespace>MSIFlux.GUI</RootNamespace>
     
