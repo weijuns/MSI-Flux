@@ -127,6 +127,17 @@
 | 7 | 干净退出: 托盘退出时停止 MSIFluxService (WinRing0 驱动卸载) + 新增 `--stop-service` CLI 参数 | `SettingsForm.cs`, `Program.cs` |
 | 8 | 修正过时注释: "请先安装 Feature Manager" 等旧描述 | `SettingsForm.cs`, `GpuSwitchService.cs` |
 
+### 11. v1.6.3 品牌清理 + 版本管理重构 (2026-08-14)
+
+| # | 改动 | 文件 |
+|---|---|---|
+| 1 | 品牌去 YAMDCC 化: 移除代码/文档中所有 YAMDCC、Sparronator9999 标识 (41 个源文件版权头, README 对比章节, DISCLAIMER), 仅保留 README 末尾致谢 | 41 个 .cs + `README.md` + `README.en.md` + `DISCLAIMER` |
+| 2 | 版本号单一来源: 删除 `GenerateAssemblyInfo=false`, 版本统一由 `MSIFlux.csproj` 的 `<Version>` 管理, SDK 自动派生 AssemblyVersion/FileVersion/InformationalVersion | `MSIFlux.csproj` |
+| 3 | 主页版本动态读取: `labelVersion.Text = "v" + Utils.GetVerString()`, 不再硬编码; 修复 exe 文件属性/About 对话框版本显示 0.0.0.0 | `SettingsForm.cs`, `SettingsForm.Designer.cs` |
+| 4 | 禁用 InformationalVersion 附加 git hash: `IncludeSourceRevisionInInformationalVersion=false` | `MSIFlux.csproj` |
+
+> **版本发布约定**: 改版本号只需修改 `MSIFlux.csproj` 的 `<Version>` 一处 (FileVersion 若需去掉 .0 尾巴则同步修改相邻的 `<FileVersion>`). 发布流程: `dotnet publish MSIFlux/MSIFlux.csproj -c Release -o publish-r2r -r win-x64 /p:PublishSingleFile=true /p:DebugType=none /p:PublishReadyToRun=true` → `git tag` → `gh release create`。
+
 ---
 
 ## 二、仍然存在的问题和不足

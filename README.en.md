@@ -157,6 +157,10 @@ Write flow: `EC.WriteByte(Reg, Value)` → WinRing0 driver → EC hardware → B
 
 ## 📅 Changelog
 
+### v1.6.3 (2026-08-14)
+- 🚀 **Branding cleanup** — All YAMDCC / Sparronator9999 references removed from code and docs (41 source file headers, README comparison section, DISCLAIMER), keeping only the acknowledgement at the end of the README.
+- 📦 **Single-source versioning** — The version is now managed solely by `<Version>` in `MSIFlux.csproj`; the homepage and About dialog read the version dynamically from the assembly instead of hardcoding. Fixed exe file properties and About dialog showing `0.0.0.0` (now correctly shows v1.6.3).
+
 ### v1.6.1 (2026-08-14)
 - 🚫 **Fixed UAC popup on double-click / auto-start at boot**: Root cause was the Settings page initializing the "Auto-start" checkbox state in its constructor — assigning `Checked` accidentally fired the `CheckedChanged` event → re-triggered `Startup.Schedule()` → every launch prompted a UAC elevation. The initial assignment is now moved *before* event subscription so startup is completely prompt-free.
 - 🌀 **Fan overdrive fix (WMI path)**: Following the official Feature Manager, the WMI ACPI path now **skips `Set_Thermal`** (only `Set_Temperature` + `Set_Fan`). Previously the software-written thermal offset was misinterpreted by the BIOS as an absolute temperature, causing 5000+ RPM fan overdrive at 53°C. The Direct EC path re-adds **DownThresholdRegs** writes with a safety check (`Down < Up`, fallback `UpThreshold - 4`) to prevent inverted hysteresis triggering hardware thermal shutdown.

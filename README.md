@@ -161,6 +161,10 @@ RPM ReadReg           — 风扇 RPM 读取寄存器
 
 ## 📅 更新日志 (Changelog)
 
+### v1.6.3 (2026-08-14)
+- 🚀 **品牌去 YAMDCC 化**：代码与文档中所有 YAMDCC / Sparronator9999 标识已清除（41 个源文件版权头、README 对比章节、DISCLAIMER），仅保留 README 末尾致谢。
+- 📦 **版本号单一来源重构**：版本号统一由 `MSIFlux.csproj` 的 `<Version>` 管理，主页与 About 对话框从程序集版本动态读取，不再硬编码；修复 exe 文件属性与 About 对话框版本号显示 `0.0.0.0` 的问题（现正确显示 v1.6.3）。
+
 ### v1.6.1 (2026-08-14)
 - 🚫 **彻底修复双击/开机自启弹出 UAC 的 Bug**：根因是设置页构造时初始化「开机自启」复选框，赋值 `Checked` 意外触发了 `CheckedChanged` 事件 → 递归调用 `Startup.Schedule()` → 每次启动都弹一次 UAC 提权。现将初始赋值移至事件挂载**之前**，启动全程零弹窗。
 - 🌀 **风扇暴转修复 (WMI 路径)**：参照官方 Feature Manager 做法，WMI ACPI 路径**移除 `Set_Thermal` 写入**（只写 `Set_Temperature` + `Set_Fan`）。此前软件层写热偏移会被 BIOS 误判为绝对温度，导致 53°C 时风扇暴转 5000+ RPM。Direct EC 路径补回 **DownThresholdRegs 写入**并加安全校验（`Down < Up`，越界回退 `UpThreshold - 4`），杜绝迟滞环倒置触发硬件热保护断电。
