@@ -47,10 +47,16 @@ public sealed class FanControlRunner : IDisposable
     public event EventHandler<TempEventArgs>? TempUpdated;
     public event EventHandler? ConfigChanged;
 
+    /// <summary>GUI↔Service 版本协商: 服务端版本与程序版本不一致时触发 (参数为描述文本).</summary>
+    public event EventHandler<string>? ServiceVersionMismatch;
+
     public int CpuTemp { get; private set; }
     public int GpuTemp { get; private set; }
     public int CpuFanRpm { get; private set; }
     public int GpuFanRpm { get; private set; }
+
+    /// <summary>CPU Package 功耗 (W), -1 表示不可用.</summary>
+    public int CpuPower { get; private set; } = -1;
 
     /// <summary>
     /// 对外可见的连接状态, 供 UI 判断"服务是否可达".
@@ -90,6 +96,10 @@ public sealed class FanControlRunner : IDisposable
             if (connected) _ipc.ApplyConf();
 
             StartPolling();
+
+            // 异步版本协商: 不阻塞 GUI 启动, 服务端版本与程序不一致时触发事件提示
+            CheckServiceVersion();
+
             return connected;
         }
         catch (Exception ex)
@@ -177,7 +187,49 @@ public sealed class FanControlRunner : IDisposable
             if (r >= 0) GpuFanRpm = r;
         }
 
-        TempUpdated?.Invoke(this, new TempEventArgs(CpuTemp, GpuTemp, CpuFanRpm, GpuFanRpm));
+        // CPU Package 功耗 (RAPL MSR, 服务端采样 ~200ms)
+        int p = _ipc.GetCpuPower(TimeSpan.FromMilliseconds(800));
+        if (p >= 0) CpuPower = p;
+
+        TempUpdated?.Invoke(this, new TempEventArgs(CpuTemp, GpuTemp, CpuFanRpm, GpuFanRpm, CpuPower));
+    }
+
+    /// <summary>
+    /// 版本协商: 异步请求服务端应用版本, 与本地程序版本不一致时触发
+    /// <see cref="ServiceVersionMismatch"/>. 旧版服务不认识 GetServiceAppVer
+    /// 命令 (返回 Error) 也会被视为不匹配.
+    /// </summary>
+    private void CheckServiceVersion()
+    {
+        _ = Task.Run(() =>
+        {
+            try
+            {
+                string localVer = MSIFlux.Common.Utils.GetVerString();
+                string? svcVer = _ipc.GetServiceAppVer(TimeSpan.FromSeconds(3));
+
+                if (svcVer == null)
+                {
+                    SafeLog("版本协商: 服务端未响应 GetServiceAppVer (旧服务或连接异常)", LogLevel.Warn);
+                    ServiceVersionMismatch?.Invoke(this,
+                        $"后台服务版本过旧或无法识别新协议 (程序 v{localVer})。\r\n建议退出并重新启动 MSI Flux 以重新安装服务。");
+                }
+                else if (svcVer != localVer)
+                {
+                    SafeLog($"版本协商: 服务端 v{svcVer} ≠ 程序 v{localVer}", LogLevel.Warn);
+                    ServiceVersionMismatch?.Invoke(this,
+                        $"后台服务版本 (v{svcVer}) 与程序版本 (v{localVer}) 不一致。\r\n建议退出并重新启动 MSI Flux 以加载最新服务。");
+                }
+                else
+                {
+                    SafeLog($"版本协商: 服务端 v{svcVer} 与程序一致");
+                }
+            }
+            catch (Exception ex)
+            {
+                SafeLog($"版本协商异常: {ex.Message}", LogLevel.Warn);
+            }
+        });
     }
 
     private static bool IsCpuFanName(string name)
@@ -552,11 +604,15 @@ public class TempEventArgs : EventArgs
     public int CpuFanRpm { get; }
     public int GpuFanRpm { get; }
 
-    public TempEventArgs(int cpuTemp, int gpuTemp, int cpuFanRpm, int gpuFanRpm)
+    /// <summary>CPU Package 功耗 (W), -1 表示不可用.</summary>
+    public int CpuPower { get; }
+
+    public TempEventArgs(int cpuTemp, int gpuTemp, int cpuFanRpm, int gpuFanRpm, int cpuPower = -1)
     {
         CpuTemp = cpuTemp;
         GpuTemp = gpuTemp;
         CpuFanRpm = cpuFanRpm;
         GpuFanRpm = gpuFanRpm;
+        CpuPower = cpuPower;
     }
 }

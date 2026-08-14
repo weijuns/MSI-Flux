@@ -1,4 +1,4 @@
-﻿// This file is part of MSIFlux.
+// This file is part of MSIFlux.
 // Copyright © 2026 weijuns.
 //
 // This program is free software: you can redistribute it and/or modify it
@@ -574,6 +574,59 @@ public sealed class EC : IDisposable
         return _Driver.ErrorCode;
     }
 
+    // ====== CPU Package Power (RAPL MSR) ======
+    // Intel RAPL: MSR_PKG_ENERGY_STATUS (0x611) 为 32 位能量计数器,
+    // 两次采样差值 × 能量单位 ÷ 时间间隔 = 平均功耗. 能量单位从
+    // MSR_RAPL_POWER_UNIT (0x606) bit12:8 读取, 失败回退 Intel 默认 15.3 µJ/LSB.
+    private const uint MSR_RAPL_POWER_UNIT = 0x606;
+    private const uint MSR_PKG_ENERGY_STATUS = 0x611;
+    private const double INTEL_ENERGY_LSB_J = 15.3e-6;
+    private const int POWER_SAMPLE_MS = 200;
+
+    /// <summary>
+    /// Reads the current CPU package power draw in watts via the RAPL MSR.
+    /// </summary>
+    /// <returns>
+    /// The CPU package power in watts, or <c>-1</c> if the driver is
+    /// unavailable or the platform does not expose the RAPL energy counter
+    /// (e.g. some AMD systems).
+    /// </returns>
+    public int GetCpuPackagePower()
+    {
+        if (!_Driver.IsOpen && !_Driver.Open()) return -1;
+
+        // 能量单位 (J/LSB): 优先读取 MSR_RAPL_POWER_UNIT, 失败回退 Intel 默认值
+        double energyUnitJ = INTEL_ENERGY_LSB_J;
+        if (ReadMsr(MSR_RAPL_POWER_UNIT, out ulong unit))
+        {
+            int e = (int)((unit >> 8) & 0x1F);
+            if (e is > 0 and <= 31)
+            {
+                energyUnitJ = 1.0 / (1UL << e);
+            }
+        }
+
+        if (!ReadMsr(MSR_PKG_ENERGY_STATUS, out ulong e1)) return -1;
+        Thread.Sleep(POWER_SAMPLE_MS);
+        if (!ReadMsr(MSR_PKG_ENERGY_STATUS, out ulong e2)) return -1;
+
+        // 32 位计数器回绕处理
+        uint diff = unchecked((uint)(e2 - e1));
+        if (diff == 0) return 0;
+
+        double watts = diff * energyUnitJ / (POWER_SAMPLE_MS / 1000.0);
+        return (int)Math.Round(watts);
+    }
+
+    private bool ReadMsr(uint index, out ulong value)
+    {
+        value = 0;
+        if (!_Driver.IsOpen) return false;
+
+        MsrIndexIn input = new(index);
+        return _Driver.IOControl((uint)Ring0Control.ReadMsr, ref input, out value);
+    }
+
     private enum Ring0Control : uint
     {
         // DeviceType, Function, Access (1 = Read, 2 = Write, 0 = Any)
@@ -581,6 +634,18 @@ public sealed class EC : IDisposable
         GetRefCount      = 40000u << 16 | 0x801 << 2,
         ReadIOPortByte   = 40000u << 16 | 0x833 << 2 | 1 << 14,
         WriteIOPortByte  = 40000u << 16 | 0x836 << 2 | 2 << 14,
+        ReadMsr          = 40000u << 16 | 0x821 << 2 | 1 << 14,
+    }
+
+    [StructLayout(LayoutKind.Sequential, Pack = 1)]
+    private struct MsrIndexIn
+    {
+        public uint Index;
+
+        public MsrIndexIn(uint index)
+        {
+            Index = index;
+        }
     }
 
     [StructLayout(LayoutKind.Sequential, Pack = 1)]

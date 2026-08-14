@@ -1,4 +1,4 @@
-﻿using MessagePack;
+using MessagePack;
 
 namespace MSIFlux.IPC;
 
@@ -145,6 +145,28 @@ public enum Response
     /// • Disabled: true if the camera was disabled, false if enabled.</para>
     /// </remarks>
     CamToggled,
+    /// <summary>
+    /// The result of a <see cref="Command.GetServiceAppVer"/> command.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This response's <see cref="ServiceResponse.Value"/> field includes
+    /// the following data as a <see langword="string"/>:<br/>
+    /// • Version: The service application version (e.g. "1.6.3").
+    /// </para>
+    /// </remarks>
+    ServiceAppVer,
+    /// <summary>
+    /// The result of a <see cref="Command.GetCpuPower"/> command.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This response's <see cref="ServiceResponse.Value"/> field includes
+    /// the following data as an <see langword="int"/>:<br/>
+    /// • Watts: Current CPU package power draw in watts.
+    /// </para>
+    /// </remarks>
+    CpuPower,
 }
 
 /// <summary>

@@ -187,6 +187,22 @@ internal sealed class ServiceIpcProxy : IDisposable
         return UnboxInt(resp.Value[1]);
     }
 
+    /// <summary>获取服务端应用版本 (如 "1.6.3"), 用于 GUI↔Service 版本协商. 失败返回 null.</summary>
+    public string? GetServiceAppVer(TimeSpan? timeout = null)
+    {
+        var resp = SendAndWait(Command.GetServiceAppVer, Response.ServiceAppVer, timeout);
+        if (resp?.Value is { Length: > 0 } v && v[0] is string s) return s;
+        return null;
+    }
+
+    /// <summary>获取 CPU Package 功耗 (W). 不可用或失败返回 -1.</summary>
+    public int GetCpuPower(TimeSpan? timeout = null)
+    {
+        var resp = SendAndWait(Command.GetCpuPower, Response.CpuPower, timeout);
+        if (resp?.Value is { Length: > 0 } v) return UnboxInt(v[0]);
+        return -1;
+    }
+
     public bool ReadECByte(byte reg, out byte value, TimeSpan? timeout = null)
     {
         value = 0;
@@ -327,6 +343,8 @@ internal sealed class ServiceIpcProxy : IDisposable
             case Response.FanSpeed:   return Command.GetFanSpeed;
             case Response.ReadResult: return Command.ReadECByte;
             case Response.ServiceVer: return Command.GetServiceVer;
+            case Response.ServiceAppVer: return Command.GetServiceAppVer;
+            case Response.CpuPower:   return Command.GetCpuPower;
             case Response.FirmVer:    return Command.GetFirmVer;
             case Response.KeyLightBright: return Command.GetKeyLightBright;
             case Response.GpuModeResult:   return Command.GetGpuMode;

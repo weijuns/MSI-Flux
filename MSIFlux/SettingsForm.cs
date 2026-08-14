@@ -37,6 +37,9 @@ namespace MSIFlux.GUI
         private int _cpuFanRpm = 0;
         private int _gpuFanRpm = 0;
 
+        /// <summary>CPU Package 功耗 (W), -1 表示不可用 (驱动不可用或平台不支持).</summary>
+        private int _cpuPower = -1;
+
         private bool _switchingPerfModeForBattery = false;
 
         private static readonly System.Drawing.Color colorGpuEco = System.Drawing.Color.FromArgb(255, 6, 180, 138);      // green
@@ -183,7 +186,21 @@ namespace MSIFlux.GUI
                     else
                         RefreshPerfModeFromConfig();
                 };
+                // 版本协商: 服务端与程序版本不一致时提示
+                Program.FanRunner.ServiceVersionMismatch += (_, msg) =>
+                {
+                    if (InvokeRequired)
+                        BeginInvoke(() => ShowServiceVersionMismatch(msg));
+                    else
+                        ShowServiceVersionMismatch(msg);
+                };
             }
+        }
+
+        private void ShowServiceVersionMismatch(string message)
+        {
+            MessageBox.Show(message, "MSI Flux 版本不匹配",
+                MessageBoxButtons.OK, MessageBoxIcon.Warning);
         }
 
         internal void FanRunner_TempUpdated(object? sender, TempEventArgs e)
@@ -196,6 +213,7 @@ namespace MSIFlux.GUI
                     _gpuTemp = e.GpuTemp;
                     _cpuFanRpm = e.CpuFanRpm;
                     _gpuFanRpm = e.GpuFanRpm;
+                    _cpuPower = e.CpuPower;
                     UpdateTempDisplay();
                 }));
             }
@@ -205,6 +223,7 @@ namespace MSIFlux.GUI
                 _gpuTemp = e.GpuTemp;
                 _cpuFanRpm = e.CpuFanRpm;
                 _gpuFanRpm = e.GpuFanRpm;
+                _cpuPower = e.CpuPower;
                 UpdateTempDisplay();
             }
         }
@@ -1117,6 +1136,8 @@ namespace MSIFlux.GUI
                 cpuText = ": " + _cpuTemp + "°C";
                 if (_cpuFanRpm > 0)
                     cpuText += " " + _cpuFanRpm + " RPM";
+                if (_cpuPower >= 0)
+                    cpuText += " " + _cpuPower + "W";
             }
             
             if (_gpuTemp > 0)

@@ -280,6 +280,9 @@ internal sealed partial class FanControlService : ServiceBase
             case Command.GetServiceVer:
                 IPCServer.PushMessage(new ServiceResponse(Response.ServiceVer, Utils.GetRevision()), id);
                 return;
+            case Command.GetServiceAppVer:
+                IPCServer.PushMessage(new ServiceResponse(Response.ServiceAppVer, Utils.GetVerString()), id);
+                return;
             case Command.GetFirmVer:            HandleGetFirmVer(id); break;
             case Command.ReadECByte:            HandleReadECByte(id, args); break;
             case Command.WriteECByte:           HandleWriteECByte(id, args); break;
@@ -288,6 +291,7 @@ internal sealed partial class FanControlService : ServiceBase
             case Command.GetFanSpeed:           HandleGetFanSpeed(id, args); break;
             case Command.GetFanRPM:             HandleGetFanRPM(id, args); break;
             case Command.GetTemp:               HandleGetTemp(id, args); break;
+            case Command.GetCpuPower:           HandleGetCpuPower(id); break;
             case Command.GetKeyLightBright:      HandleGetKeyLightBright(id); break;
             case Command.SetKeyLightBright:      HandleSetKeyLightBright(id, args); break;
             case Command.SetWinFnSwap:          HandleSetWinFnSwap(id, args); break;
@@ -376,6 +380,15 @@ internal sealed partial class FanControlService : ServiceBase
         { SendBadArgs(Command.GetTemp, args, id); return; }
         if (!GetTemp(id, fan))
             IPCServer.PushMessage(new ServiceResponse(Response.Error, (int)Command.GetTemp), id);
+    }
+
+    private void HandleGetCpuPower(int id)
+    {
+        int watts = _EC.GetCpuPackagePower();
+        if (watts >= 0)
+            IPCServer.PushMessage(new ServiceResponse(Response.CpuPower, watts), id);
+        else
+            IPCServer.PushMessage(new ServiceResponse(Response.Error, (int)Command.GetCpuPower), id);
     }
 
     private void HandleGetKeyLightBright(int id) { GetKeyLight(id); }

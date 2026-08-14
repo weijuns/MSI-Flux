@@ -261,6 +261,29 @@ public enum Command
     /// <para>This command expects a <see langword="bool"/> argument: true to turn on, false to turn off.</para>
     /// </remarks>
     SetMicMuteLed,
+    /// <summary>
+    /// Gets the application version string (e.g. "1.6.3") of the running service,
+    /// used for GUI↔Service version negotiation.
+    /// </summary>
+    /// <remarks>
+    /// <para>This command expects no arguments.</para>
+    /// <para>
+    /// The result is sent to the caller as a
+    /// <see cref="Response.ServiceAppVer"/> message.
+    /// </para>
+    /// </remarks>
+    GetServiceAppVer,
+    /// <summary>
+    /// Gets the current CPU package power draw in watts (RAPL MSR).
+    /// </summary>
+    /// <remarks>
+    /// <para>This command expects no arguments.</para>
+    /// <para>
+    /// The result is sent to the caller as a
+    /// <see cref="Response.CpuPower"/> message.
+    /// </para>
+    /// </remarks>
+    GetCpuPower,
 }
 
 /// <summary>
