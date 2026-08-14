@@ -1,4 +1,4 @@
-// This file is part of MSIFlux, based on YAMDCC.
+// This file is part of MSIFlux.
 // Licensed under GPL-3.0-or-later.
 //
 // ServiceManager: 封装 Windows 服务的安装/卸载/启停/状态查询.
@@ -159,7 +159,7 @@ internal static class ServiceManager
             return false;
         }
 
-        // 清理旧版 YAMDCC 残留服务 (SERVICE_NAME 含空格, 与新名 MSIFluxService 冲突)
+        // 清理旧版残留服务 (SERVICE_NAME 含空格, 与新名 MSIFluxService 冲突)
         TryRemoveLegacyService();
 
         string exe = GetExecutablePath();
@@ -199,7 +199,7 @@ internal static class ServiceManager
     }
 
     /// <summary>
-    /// 清理旧版 YAMDCC 残留服务 (SERVICE_NAME = "MSI Flux Service", 含空格).
+    /// 清理旧版残留服务 (SERVICE_NAME = "MSI Flux Service", 含空格).
     /// 该旧服务名与 Install() 的 DisplayName 冲突 (错误 1078), 导致新装失败.
     /// </summary>
     private static void TryRemoveLegacyService()

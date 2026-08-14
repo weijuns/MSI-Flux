@@ -1,6 +1,5 @@
-// This file is part of MSIFlux, based on YAMDCC.
-// Original Copyright © 2023-2025 Sparronator9999
-// Modifications Copyright © 2026 weijuns.
+// This file is part of MSIFlux.
+// Copyright © 2026 weijuns.
 //
 // This program is free software: you can redistribute it and/or modify it
 // under the terms of the GNU General Public License as published by the Free

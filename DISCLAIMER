@@ -1,8 +1,7 @@
 MSI Flux Disclaimer
 ===================
 
-This project is a modified version of YAMDCC (https://codeberg.org/Sparronator9999/YAMDCC),
-originally created by Sparronator9999 and licensed under GPL-3.0.
+This project is licensed under the GNU General Public License v3.0 (GPL-3.0).
 
 This program requires low-level access to your computer hardware (EC registers, WMI ACPI,
 Windows services) to apply settings. While no issues should arise from this, the authors

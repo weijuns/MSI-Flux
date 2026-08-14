@@ -2,7 +2,7 @@
 
 **English** | **[中文](README.md)**
 
-> A deeply customized MSI laptop control tool based on [YAMDCC](https://codeberg.org/Sparronator9999/YAMDCC),
+> A lightweight MSI laptop control tool,
 > featuring **GPU triple-mode switching**, a modern UI, and bundled WMI ACPI bootstrap and minimal Feature Manager files.
 >
 > 🎯 **Single exe, no installation** — Just double-click to run. Runtime memory usage is only ~10MB, incredibly lightweight.
@@ -12,7 +12,7 @@
 
 ## ✨ Key Features
 
-- **🎮 GPU Triple-Mode Switching** — Supports Hybrid / Discrete / Eco (iGPU) GPU mode switching. **This feature was never implemented in the original YAMDCC** (marked as "Research stalled" in their Roadmap).
+- **🎮 GPU Triple-Mode Switching** — Supports Hybrid / Discrete / Eco (iGPU) GPU mode switching.
 - **🌀 Fan Control** — Custom CPU/GPU fan speed curves, temperature threshold adjustment, Cooler Boost full-speed mode
 - **🚀 Performance Modes** — Eco / Silent / Balanced / Turbo four-tier performance mode switching
 - **🔋 Battery Charge Threshold** — 0-100% custom charge limit to preserve battery health
@@ -26,27 +26,6 @@
 - **🚪 Clean Exit** — Quit from tray auto-stops the background service (WinRing0 driver unload), no leftover processes
 
 ---
-
-## 🆚 Comparison with Original YAMDCC
-
-| Feature | YAMDCC Original | MSI Flux |
-|---|---|---|
-| GPU Mode Switching | ❌ Research stalled (Roadmap v2.1) | ✔ Triple-mode (Hybrid/Discrete/Eco) |
-| GPU Switch Backend | None | WMI ACPI + Registry + UEFI Variable + Auto Service Management |
-| Fan Control | ✔ | ✔ |
-| Temperature Threshold Control | ✔ | ✔ |
-| Performance Modes | ✔ | ✔ |
-| Battery Charge Threshold | ✔ | ✔ |
-| Battery Level Display | ❌ | ✔ (SystemInformation.PowerStatus) |
-| Auto Eco on Battery | ❌ | ✔ (Auto-switch to Eco, restore last mode on AC) |
-| Power Plan Linking | ❌ | ✔ (GUI-based GUID config, fallback to Balanced, auto-switch) |
-| Config Import/Export | ❌ | ✔ (with model mismatch validation) |
-| Win/Fn Key Swap | ✔ | ✔ |
-| System Tray | ❌ | ✔ |
-| Clean Exit (stop service) | ❌ | ✔ (stops background service on exit, unloads driver) |
-| Auto-start on Boot | ❌ | ✔ (Task Scheduler) |
-| UI Interface | WinForms traditional UI | Modern card-style UI (inspired by G-Helper) |
-| Target Framework | .NET Framework 4.8 | .NET 8.0-windows |
 
 ---
 
@@ -248,7 +227,6 @@ See [DISCLAIMER](DISCLAIMER) for details.
 
 ## 📄 License
 
-This project is licensed under the [GNU General Public License v3.0](https://www.gnu.org/licenses/gpl-3.0.html), inherited from the original YAMDCC project's GPL-3.0 license.
+This project is licensed under the [GNU General Public License v3.0](https://www.gnu.org/licenses/gpl-3.0.html).
 
-Copyright © 2023-2026 Sparronator9999 (YAMDCC original author)
-Copyright © 2026 weijuns (MSI Flux improvements)
+Copyright © 2026 weijuns

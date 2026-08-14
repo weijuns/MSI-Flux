@@ -1,4 +1,4 @@
-// This file is part of MSIFlux, based on YAMDCC.
+// This file is part of MSIFlux.
 // Licensed under GPL-3.0-or-later.
 //
 // FanControlRunner: GUI 侧 IPC 代理门面, 为 SettingsForm / Fans / Extra 提供公共 API.

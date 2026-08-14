@@ -2,8 +2,8 @@
 
 **[English](README.en.md)** | **中文**
 
-> 基于 [YAMDCC](https://codeberg.org/Sparronator9999/YAMDCC) 深度定制的 MSI 笔记本控制工具,
-> 新增 **GPU 三模式切换**、现代化 UI, 并内置 WMI ACPI 引导器和 Feature Manager 精简文件。
+> 轻量级 MSI 笔记本控制工具,
+> 内置 **GPU 三模式切换**、现代化 UI、WMI ACPI 引导器和 Feature Manager 精简文件。
 >
 > 🎯 **单体 exe, 无需安装** — 双击即用, 实测运行时后台内存仅占用 ~10MB, 非常清爽。
 > 内置 .NET 运行时检测, 未安装 .NET 8 时自动弹窗引导下载。
@@ -16,7 +16,7 @@
 - **⏱️ 0.5ms 高精度系统定时器** — 基于 `NtSetTimerResolution` (5000 * 100ns) 降低微秒级系统调度延迟，提升游戏与高频刷新率平滑度。
 - **🔋 USB 关机充电 (Power Share)** — 直接读写 UEFI NVRAM `MsiDCVarData` 变量，开关笔记本关机 USB 供电支持。
 - **📐 更多设置 2 列自适应网格 UI** — 优雅的双列 Grid 卡片排列，贴合主窗口左侧底边对齐，不再出现文字遮挡与窗口挤压。
-- **🎮 GPU 三模式切换** — 支持 Hybrid (混合输出) / Discrete (独显直连) / Eco (核显模式) 三种 GPU 模式切换, **这是 YAMDCC 原版未实现的功能** (原版 Roadmap 中标注为 "Research stalled")
+- **🎮 GPU 三模式切换** — 支持 Hybrid (混合输出) / Discrete (独显直连) / Eco (核显模式) 三种 GPU 模式切换
 - **🌀 风扇控制** — 自定义 CPU/GPU 风扇转速曲线, 温度阈值调节, Cooler Boost 全速模式
 - **🚀 性能模式** — 省电 / 安静 / 均衡 / 加速 四档性能模式切换
 - **🔋 电池充电阈值** — 0-100% 自定义充电上限, 保护电池健康
@@ -30,27 +30,6 @@
 - **🚪 干净退出** — 托盘右键退出时自动停止后台服务 (WinRing0 驱动卸载), 无残留进程
 
 ---
-
-## 🆚 与原版 YAMDCC 的对比
-
-| 功能 | YAMDCC 原版 | MSI Flux |
-|---|---|---|
-| GPU 模式切换 | ❌ 研究停滞 (Roadmap v2.1) | ✔ 三模式 (Hybrid/Discrete/Eco) |
-| GPU 切换底层 | 无 | WMI ACPI + 注册表 + UEFI 变量 + 自动服务管理 |
-| 风扇控制 | ✔ | ✔ |
-| 温度阈值控制 | ✔ | ✔ |
-| 性能模式 | ✔ | ✔ |
-| 电池充电阈值 | ✔ | ✔ |
-| 电池电量显示 | ❌ | ✔ (SystemInformation.PowerStatus) |
-| 拔电自动省电 | ❌ | ✔ (拔电切 Eco, 插电恢复上次模式) |
-| 电源计划联动 | ❌ | ✔ (GUI 填写 GUID, 留空回退平衡, 自动联动) |
-| 配置导入导出 | ❌ | ✔ (含机型匹配校验) |
-| Win/Fn 键互换 | ✔ | ✔ |
-| 系统托盘最小化 | ❌ | ✔ |
-| 干净退出 (停止服务) | ❌ | ✔ (退出时停止后台服务, 卸载驱动) |
-| 开机自启动 | ❌ | ✔ (Task Scheduler) |
-| UI 界面 | WinForms 传统界面 | 现代化卡片式 UI (参考 G-Helper) |
-| 目标框架 | .NET Framework 4.8 | .NET 8.0-windows |
 
 ---
 
@@ -252,7 +231,6 @@ dotnet publish Launcher/Launcher.csproj -c Release -o publish-launcher
 
 ## 📄 许可证
 
-本项目基于 [GNU General Public License v3.0](https://www.gnu.org/licenses/gpl-3.0.html) 开源, 继承自 YAMDCC 原项目的 GPL-3.0 许可证。
+本项目基于 [GNU General Public License v3.0](https://www.gnu.org/licenses/gpl-3.0.html) 开源。
 
-Copyright © 2023-2026 Sparronator9999 (YAMDCC 原作者)
-Copyright © 2026 weijuns (MSI Flux 改进部分)
+Copyright © 2026 weijuns
