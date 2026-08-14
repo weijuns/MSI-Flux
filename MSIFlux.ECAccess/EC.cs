@@ -574,6 +574,12 @@ public sealed class EC : IDisposable
         return _Driver.ErrorCode;
     }
 
+    /// <summary>获取驱动连接是否已打开 (供上层诊断).</summary>
+    public bool IsDriverOpen()
+    {
+        return _Driver.IsOpen;
+    }
+
     // ====== CPU Package Power (RAPL MSR) ======
     // Intel RAPL: MSR_PKG_ENERGY_STATUS (0x611) 为 32 位能量计数器,
     // 两次采样差值 × 能量单位 ÷ 时间间隔 = 平均功耗. 能量单位从

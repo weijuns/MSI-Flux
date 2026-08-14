@@ -386,9 +386,16 @@ internal sealed partial class FanControlService : ServiceBase
     {
         int watts = _EC.GetCpuPackagePower();
         if (watts >= 0)
+        {
             IPCServer.PushMessage(new ServiceResponse(Response.CpuPower, watts), id);
+        }
         else
+        {
+            // 诊断日志: 记录驱动状态与 Win32 错误码, 便于定位 MSR 读取失败原因
+            Log.Warn($"GetCpuPower 失败: 驱动打开={_EC.IsDriverOpen()}, " +
+                     $"驱动错误码=0x{_EC.GetDriverError():X8}, 结果={watts}");
             IPCServer.PushMessage(new ServiceResponse(Response.Error, (int)Command.GetCpuPower), id);
+        }
     }
 
     private void HandleGetKeyLightBright(int id) { GetKeyLight(id); }
