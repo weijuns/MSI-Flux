@@ -1693,7 +1693,6 @@ namespace MSIFlux.GUI
             labelVersion.Padding = new Padding(5, 0, 5, 0);
             labelVersion.Size = new Size(399, 40);
             labelVersion.TabIndex = 38;
-            labelVersion.Text = "v1.6.2";
             labelVersion.TextAlign = ContentAlignment.MiddleLeft;
             // 
             // buttonHDRControl

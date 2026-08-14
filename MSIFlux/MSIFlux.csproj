@@ -12,8 +12,14 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <PlatformTarget>AnyCPU</PlatformTarget>
     <AllowUnsafeBlocks>True</AllowUnsafeBlocks>
+    <!-- 版本号唯一数据源: 只改这里的 <Version> 即可, SDK 自动生成程序集版本特性 -->
+    <Version>1.6.2</Version>
     <AssemblyVersion>1.6.2</AssemblyVersion>
+    <FileVersion>1.6.2</FileVersion>
     <InformationalVersion>1.6.2</InformationalVersion>
+    <!-- 禁用 SDK 在 InformationalVersion 后自动附加 git commit hash (默认 true),
+         保证发布产物产品版本干净显示为 1.6.2 而非 1.6.2+<sha> -->
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
     <RootNamespace>MSIFlux.GUI</RootNamespace>
     
     <!-- 框架依赖单文件发布 (参考 g-helper):
@@ -26,8 +32,6 @@
     <!-- 追求"只产出一个 exe": 关闭 pdb 外置, 调试信息内嵌到 exe 里. -->
     <DebugType>embedded</DebugType>
     <DebugSymbols>true</DebugSymbols>
-
-    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
   </PropertyGroup>
 
   <!-- 框架依赖模式下关闭 ReadyToRun: R2R 会生成预编译原生代码显著增大 exe,

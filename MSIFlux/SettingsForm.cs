@@ -55,6 +55,9 @@ namespace MSIFlux.GUI
             InitializeComponent();
             InitTheme(true);
 
+            // 版本号单一来源: 从程序集版本读取 (MSIFlux.csproj <Version>), 主页不再硬编码
+            labelVersion.Text = "v" + MSIFlux.Common.Utils.GetVerString();
+
             tempRefreshTimer = new System.Windows.Forms.Timer();
             tempRefreshTimer.Interval = 1000;
             tempRefreshTimer.Tick += TempRefreshTimer_Tick;
