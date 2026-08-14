@@ -182,6 +182,14 @@ RPM ReadReg           — 风扇 RPM 读取寄存器
 
 ## 📅 更新日志 (Changelog)
 
+### v1.6.1 (2026-08-14)
+- 🚫 **彻底修复双击/开机自启弹出 UAC 的 Bug**：根因是设置页构造时初始化「开机自启」复选框，赋值 `Checked` 意外触发了 `CheckedChanged` 事件 → 递归调用 `Startup.Schedule()` → 每次启动都弹一次 UAC 提权。现将初始赋值移至事件挂载**之前**，启动全程零弹窗。
+- 🌀 **风扇暴转修复 (WMI 路径)**：参照官方 Feature Manager 做法，WMI ACPI 路径**移除 `Set_Thermal` 写入**（只写 `Set_Temperature` + `Set_Fan`）。此前软件层写热偏移会被 BIOS 误判为绝对温度，导致 53°C 时风扇暴转 5000+ RPM。Direct EC 路径补回 **DownThresholdRegs 写入**并加安全校验（`Down < Up`，越界回退 `UpThreshold - 4`），杜绝迟滞环倒置触发硬件热保护断电。
+- 🛡️ **官方 MSI 服务共存保护**：检测到 MSI Center / Feature Manager 服务在运行时，跳过 EC 热键轮询（`EC[0xC1]` 不再每 400ms 强制写回，只在首次或 bit7 被意外清除时启用一次），EC 硬件同步定时器 500ms → **2000ms**，避免与官方软件双写 EC 寄存器冲突导致系统强制断电。
+- ⚙️ **开机自启改为一键提权切换**：「开机自启」开关通过提权子进程一次性完成「计划任务 (Task Scheduler, `RunLevel=LUA`) + 服务启动类型 (auto/manual)」联动切换，不再退出程序；UAC 取消时复选框自动回滚。
+- 🔧 **服务启动更宽容**：服务启动超时由 10s → 15s 并再加 15s 宽限，启动失败**不再弹 UAC**，以降级模式继续运行。
+- 📷 **F6 摄像头 OSD 稳定性**：恢复 `CamGuid` 设备 GUID 过滤、移除 `DEVICE_NOTIFY_ALL_INTERFACE_CLASSES` 与重复计数去重逻辑，修复偶发不弹窗/重复弹窗。
+
 ### v1.6.0 (2026-08-07)
 - 🛡️ **服务 SDDL 授权与无感双击自愈**：彻底解决普通用户权限双击时提示“后台服务未运行”的问题。采用规范的 `sc.exe sdset` 给 `Authenticated Users` (`AU`) 完美注入完整启动与控制权限 (`CCLCSWRPWPDTLOCRRC`)，并修复了空格路径误判定 Bug。
 - 💡 **物理按键指示灯 Direct EC 物理兜底**：重构 F1（主音量静音）与 F5（麦克风禁用）指示灯控制逻辑，除了支持 `MSI_ACPI` / `MSI_ACPI2` WMI 轮询外，新增对 EC 物理寄存器 `0x2C` (Mic) 和 `0x2D` (Audio) 的直接位改写，即使无官方 WMI 驱动也能强制点亮物理指示灯。

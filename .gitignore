@@ -19,6 +19,8 @@ Desktop.ini
 ## Publish
 publish/
 publish-launcher/
+publish_direct/
+publish_framework/
 
 ## Temp
 .workbuddy/

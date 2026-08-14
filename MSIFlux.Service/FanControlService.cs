@@ -105,6 +105,8 @@ internal sealed partial class FanControlService : ServiceBase
         IPCServer.Error += new EventHandler<PipeErrorEventArgs<ServiceCommand, ServiceResponse>>(IPCServerError);
     }
 
+    private bool _msiServicesRunning;
+
     #region Events
     protected override void OnStart(string[] args)
     {
@@ -122,7 +124,8 @@ internal sealed partial class FanControlService : ServiceBase
                 {
                     sb.Append($"- {svc} ");
                 }
-                Log.Warn($"检测到官方 MSI 服务在运行 ({sb})，请注意避免双重写入 EC。");
+                _msiServicesRunning = true;
+                Log.Warn($"检测到官方 MSI 服务在运行 ({sb})。为避免 EC 寄存器争抢导致系统关机, EC 热键轮询与 Direct EC 写入将受限。");
             }
 
             // Install WinRing0 to get EC access (软加载: 被杀软拦截时降级走 WMI ACPI, 不抛异常崩服务)
@@ -709,20 +712,22 @@ internal sealed partial class FanControlService : ServiceBase
                         {
                             success = false;
                         }
-                        byte downT;
+                        // DownThreshold 寄存器也必须写入，否则 EC 固件的升降档阈值不匹配，
+                        // 可能导致风扇无法正确响应温度变化，最终触发硬件热保护断电。
+                        // 必须保证 Down < Up, 否则 EC 硬件比较器会判定迟滞环倒置。
+                        byte downVal;
                         if (Config.OffsetDT)
                         {
                             int diff = t.UpThreshold - t.DownThreshold;
-                            downT = (diff > 0 && diff < 30) ? (byte)diff : (byte)4;
+                            downVal = (diff > 0 && diff < 30) ? (byte)diff : (byte)4;
                         }
                         else
                         {
-                            downT = (t.DownThreshold < t.UpThreshold && t.DownThreshold > 0)
+                            downVal = (t.DownThreshold < t.UpThreshold && t.DownThreshold > 0)
                                 ? (byte)t.DownThreshold
                                 : (byte)Math.Max(0, t.UpThreshold - 4);
                         }
-
-                        if (!LogECWriteByte(cfg.DownThresholdRegs[j - 1], downT))
+                        if (!LogECWriteByte(cfg.DownThresholdRegs[j - 1], downVal))
                         {
                             success = false;
                         }
@@ -1261,6 +1266,12 @@ internal sealed partial class FanControlService : ServiceBase
     {
         try
         {
+            if (_msiServicesRunning)
+            {
+                Log.Info("Fn 热键: 检测到官方 MSI 服务在运行, 跳过 EC 热键轮询以避免双写冲突");
+                return;
+            }
+
             _hotkeyCts?.Cancel();
             _hotkeyCts = new CancellationTokenSource();
             var token = _hotkeyCts.Token;
@@ -1343,7 +1354,7 @@ internal sealed partial class FanControlService : ServiceBase
     // 此同步器检测到 EC[210] 变化后，自动同步 MSI Flux 的 Config 并通知 GUI。
     // ==================================================================
 
-    private readonly System.Timers.Timer EcSyncTimer = new(500);
+    private readonly System.Timers.Timer EcSyncTimer = new(2000);
     private DateTime _lastEcWriteTime = DateTime.MinValue;
 
     private void StartEcSyncTimer()
@@ -1352,7 +1363,7 @@ internal sealed partial class FanControlService : ServiceBase
         EcSyncTimer.Elapsed += OnEcSyncElapsed;
         EcSyncTimer.AutoReset = true;
         EcSyncTimer.Start();
-        Log.Info("EC 硬件状态同步定时器已启动 (500ms 轮询 EC 210 寄存器)");
+        Log.Info("EC 硬件状态同步定时器已启动 (2000ms 轮询 EC 210 寄存器)");
     }
 
     private void StopEcSyncTimer()
@@ -1397,11 +1408,13 @@ internal sealed partial class FanControlService : ServiceBase
 
     /// <summary>轮询回调: 读 EC[0xC0], 匹配编码 → 执行对应动作 (由 Task 循环调用)</summary>
     private int _hotkeyPollCount;
+    private bool _hotkeyDebugEnabled;
     private void HotkeyPollElapsed()
     {
         try
         {
-            // 每次轮询都确保 debug 模式仍然开启 (仿 BabaConsole TryEnableMsiHotkeyDebugRegister)
+            // 只在首次或 bit7 被意外清除时启用热键调试模式, 不每轮都强制写回
+            // 高频改写 EC[0xC1] 可能与 MSI Center 产生寄存器冲突导致 EC 层强制断电
             if (!_EC.ReadByte(EC_HOTKEY_CTRL, out byte c1))
             {
                 if (++_hotkeyPollCount % 30 == 0)
@@ -1410,9 +1423,19 @@ internal sealed partial class FanControlService : ServiceBase
             }
             if ((c1 & 0x80) == 0)
             {
-                byte c1New = (byte)(c1 | 0x80);
-                _EC.WriteByte(EC_HOTKEY_CTRL, c1New);
-                Log.Info($"Fn 热键: 调试模式已恢复 (EC[0xC1]: 0x{c1:X2} → 0x{c1New:X2})");
+                if (!_hotkeyDebugEnabled)
+                {
+                    byte c1New = (byte)(c1 | 0x80);
+                    _EC.WriteByte(EC_HOTKEY_CTRL, c1New);
+                    _hotkeyDebugEnabled = true;
+                    Log.Info($"Fn 热键: 调试模式已开启 (EC[0xC1]: 0x{c1:X2} → 0x{c1New:X2})");
+                }
+                else
+                {
+                    // MSI Center 可能已清除 bit7, 不争夺, 避免双向冲突
+                    Log.Debug($"Fn 热键: EC[0xC1] bit7 已被清除 (0x{c1:X2}), 放弃轮询");
+                    return;
+                }
             }
             // 诊断: 每 25 次打印一次 C1 和 C0 的值 (Info 级别确保可见)
             if (_hotkeyPollCount % 25 == 0)
@@ -1808,51 +1831,19 @@ internal sealed partial class FanControlService : ServiceBase
             fanData[0] = controlByte;
             Array.Copy(speeds, 0, fanData, 1, 7);
 
-            // 构造 Thermal (Offsets)
-            byte throttleTemp = 90;
-            byte[] existingThermal = WmiGetAcpiBytes("Get_Thermal", fanId);
-            if (existingThermal != null && existingThermal.Length > 1)
-            {
-                throttleTemp = existingThermal[1];
-            }
-            
-            byte[] offsets = new byte[6];
-            for (int k = 0; k < 6; k++)
-            {
-                // WMI Get_Thermal / Set_Thermal 接口输入的是相对退档温差 Offset (如 4°C)
-                // BIOS 内部公式为: DownTemp = UpTemp - Offset
-                // 若传入 48°C 绝对温度，BIOS 会计算出 DownTemp = 48 - 48 = 0°C，导致风扇无法退档并误报高温狂转 5000+ RPM
-                int idx = k + 1; // 对应点 1 到 点 6
-                if (idx < curveCfg.TempThresholds.Count)
-                {
-                    var t = curveCfg.TempThresholds[idx];
-                    int diff = t.UpThreshold - t.DownThreshold;
-                    byte offsetByte = (diff > 0 && diff < 30) ? (byte)diff : (byte)4;
-                    offsets[k] = offsetByte;
-                }
-                else
-                {
-                    offsets[k] = 4;
-                }
-            }
-            
-            byte[] thermalData = new byte[7];
-            thermalData[0] = throttleTemp;
-            Array.Copy(offsets, 0, thermalData, 1, 6);
-
-            // 调用 WMI
+            // 调用 WMI (参照 Feature Manager 官方做法: 只写 Set_Temperature + Set_Fan, 不写 Set_Thermal)
+            // EC 固件内置退档迟滞逻辑, 软件层不应插手, 否则可能写入错误偏置导致风扇无法退档暴转
             bool tOk = WmiSetAcpiBytes("Set_Temperature", fanId, tempData);
             bool fOk = WmiSetAcpiBytes("Set_Fan", fanId, fanData);
-            bool thOk = WmiSetAcpiBytes("Set_Thermal", fanId, thermalData);
 
-            if (tOk && fOk && thOk)
+            if (tOk && fOk)
             {
-                Log.Info($"[WMI Fan] 成功通过 WMI ACPI 应用风扇 {fanName} 曲线及滞后偏置，thermalLimit={thermalLimit}, controlByte=0x{controlByte:X2}, throttleTemp={throttleTemp}");
+                Log.Info($"[WMI Fan] 成功通过 WMI ACPI 应用风扇 {fanName} 曲线，thermalLimit={thermalLimit}, controlByte=0x{controlByte:X2}");
                 return true;
             }
             else
             {
-                Log.Warn($"[WMI Fan] WMI 下发曲线失败，Set_Temp={tOk}, Set_Fan={fOk}, Set_Thermal={thOk}");
+                Log.Warn($"[WMI Fan] WMI 下发曲线失败，Set_Temp={tOk}, Set_Fan={fOk}");
             }
         }
         catch (Exception ex)

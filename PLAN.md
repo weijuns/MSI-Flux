@@ -34,6 +34,8 @@
 - 拔电自动省电 + 插电恢复上次模式（P1-1 ✅）
 - 电源计划联动（用户 GUI 填写 GUID，P2-1 ✅）
 - 配置导入导出（P2-2 ✅）
+- 温度/转速仪表盘（CPU/GPU 温度 + 风扇 RPM 实时数字显示，P1-3 ✅）
+- Fn 热键联动（F1/F5/F6/F7/F8 检测与动作执行，双通道: 键盘钩子 + EC 轮询 + WMI 监听，P2-3 ✅）
 
 ### v1.1.0 质量优化
 
@@ -64,10 +66,10 @@
 | **P0** | 开机自启动 | GUI + Common | 低 | ✅ 已实现 |
 | **P1** | Windows 事件热响应（拔电省电） | GUI + Common | 中 | ✅ 已实现 |
 | **P1** | 电池电量实时监控 | GUI | 低 | ✅ 已实现 |
-| **P1** | 温度/功耗仪表盘 | Service + IPC + GUI | 高 | ❌ 未实现 |
+| **P1** | 温度/功耗仪表盘 | Service + IPC + GUI | 高 | ✅ 已实现 (温度/RPM 数字实时显示) |
 | **P2** | 电源计划联动 | GUI + Common | 低 | ✅ 已实现 |
 | **P2** | 配置导入导出 | GUI | 低 | ✅ 已实现 |
-| **P2** | 键盘宏重映射 | Service（需 HID 驱动研究） | 高 | ❌ 暂缓 |
+| **P2** | 键盘宏重映射 | Service（需 HID 驱动研究） | 高 | ✅ 已实现 (Fn 热键固定映射联动) |
 
 ---
 
@@ -297,9 +299,11 @@ SystemEvents.PowerModeChanged → PowerStatus change
 
 ---
 
-### 4.3 温度/功耗仪表盘
+### 4.3 温度/功耗仪表盘 ✅ (已实现)
 
 **目标**：主界面添加实时温度曲线图和功耗显示。
+
+> **实际实现 (✅)**：主界面已实现 CPU/GPU 温度与风扇转速的**实时数字显示**（`labelCPUFan` / `labelGPUFan`，格式 `CPU: 85°C 3500 RPM`）。数据流：`FanControlRunner.PollOnce()`（1s 定时器）→ IPC `GetTemp` / `GetFanRPM` → `TempUpdated` 事件 → `SettingsForm.UpdateTempDisplay()`；CPU/GPU 角色按 `FanConf.Name` 智能识别（不再硬编码索引）。原设计中的**温度曲线图**和 **CPU 功耗瓦数**（`Command.GetCpuPower`）**未实现**。
 
 **技术选型**：
 
@@ -361,9 +365,16 @@ SystemEvents.PowerModeChanged → PowerStatus change
 
 ---
 
-### 5.3 键盘宏重映射
+### 5.3 键盘宏重映射 ✅ (已实现)
 
 **目标**：允许用户自定义键盘快捷键（如 Fn+F5 切换风扇模式）。
+
+> **实际实现 (✅)**：Fn 热键检测与动作联动的完整链路已实现，采用**双通道检测**：
+> - **GUI 键盘钩子**（`HotkeyHook.cs`）：低级键盘钩子 `WH_KEYBOARD_LL`，`ScanMap`（Fn+F5 麦克风静音 / Fn+F6 摄像头）+ `VkMap`（Fn+F1 静音）+ Fn+F7 性能模式循环（scanCode 0x0011，过滤 W 键冲突）
+> - **服务端 EC 轮询**（`FanControlService.cs`）：EC[0xC0] 热键调试寄存器 400ms 轮询，映射表 `HotkeyCodes.Map`（Fn+F7/F6/↑/F8/Esc/F1/F2/F3）
+> - **服务端 WMI 监听**：`WMIEvent` / `MSIEvent` / `MSI_ACPI` 热键事件类
+>
+> **未实现**：用户自定义"按键→动作"映射的配置层（`Paths.HotkeyConf` → `HotkeyConfig.xml` 常量已定义但零引用，无配置类 / GUI / 读写逻辑）。当前映射表为硬编码（`ScanMap` / `VkMap` / `HotkeyCodes.Map`）。
 
 **技术难点**：
 
@@ -398,7 +409,7 @@ Phase 2 (自动更新)
 Phase 3 ✅ (已完成)
 ├── AC/DC 电源事件响应                ✅ (拔电省电 + 插电恢复)
 ├── 电池电量实时显示                  ✅ (SystemInformation.PowerStatus)
-├── 温度/转速/功耗仪表盘              [未实现，暂不做功耗显示]
+├── 温度/转速/功耗仪表盘              ✅ (温度/RPM 实时数字显示; 曲线图与功耗瓦数未做)
 └── 托盘菜单快捷控制                  [未实现]
 
 Phase 4 ✅ (已完成)
@@ -407,7 +418,7 @@ Phase 4 ✅ (已完成)
 └── 多配置方案切换                    [未实现]
 
 Phase 5 (高级功能，研究优先)
-├── 键盘宏重映射（逆向研究）          [不确定]
+├── 键盘宏重映射（逆向研究）          ✅ (Fn 热键固定映射联动; 用户自定义配置层未做)
 └── 更多机型适配测试                  [持续]
 ```
 
@@ -479,7 +490,7 @@ Phase 5 (高级功能，研究优先)
 | IPC 版本不匹配 | 新 GUI 配旧 Service 崩溃 | 添加版本检查，版本不匹配时提示 |
 | EC 寄存器地址跨机型不同 | 功能在其他机型失效 | 维护多机型 XML 配置，提供"机型适配"社区流程 |
 | 自动更新文件覆盖失败 | 更新中断 | 更新前备份，提供回滚机制 |
-| 键盘宏逆向不确定性 | 功能无法实现 | 先在 GPUSwitch 项目中命令行验证 |
+| 键盘宏自定义配置层 | 用户自定义按键→动作映射未实现 | 当前为硬编码映射表 (ScanMap/VkMap/HotkeyCodes.Map); 后续可基于已定义的 `HotkeyConf` (`HotkeyConfig.xml`) 扩展配置层 |
 
 ---
 

@@ -146,6 +146,10 @@ namespace MSIFlux.GUI
             sliderBattery.MouseUp += SliderBattery_MouseUp;
             sliderBattery.ValueChanged += SliderBattery_ValueChanged;
 
+            // 必须先设置初始状态, 再挂 CheckedChanged 事件.
+            // 否则赋值触发事件会调用 Startup.Schedule() → RelaunchElevated → 弹 UAC!
+            checkStartup.Checked = Startup.IsScheduled();
+
             checkStartup.CheckedChanged += CheckStartup_CheckedChanged;
 
             Text = "MSI Flux";
@@ -158,8 +162,6 @@ namespace MSIFlux.GUI
                 if (ico != null) this.Icon = ico;
             }
             catch { }
-
-            checkStartup.Checked = Startup.IsScheduled();
 
             InitTrayIcon();
 
@@ -745,10 +747,16 @@ namespace MSIFlux.GUI
 
         private void CheckStartup_CheckedChanged(object? sender, EventArgs e)
         {
-            if (checkStartup.Checked)
-                Startup.Schedule();
-            else
-                Startup.UnSchedule();
+            bool requested = checkStartup.Checked;
+            bool ok = requested ? Startup.Schedule() : Startup.UnSchedule();
+
+            // 若操作失败 (例如用户取消 UAC), 回滚复选框状态, 避免 UI 与实际不一致
+            if (!ok)
+            {
+                checkStartup.CheckedChanged -= CheckStartup_CheckedChanged;
+                checkStartup.Checked = !requested;
+                checkStartup.CheckedChanged += CheckStartup_CheckedChanged;
+            }
         }
 
         private void SettingsForm_FormClosing(object? sender, FormClosingEventArgs e)

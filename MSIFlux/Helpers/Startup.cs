@@ -19,7 +19,12 @@ namespace MSIFlux.GUI.Helpers
             try
             {
                 using (TaskService taskService = new TaskService())
-                    return (taskService.RootFolder.AllTasks.Any(t => t.Name == taskName));
+                {
+                    // 计划任务 + 服务启动类型 两者都算开机自启. 以计划任务为准,
+                    // 服务启动类型作为辅助判断 (若服务也是 auto 也视为已开启).
+                    bool taskExists = taskService.RootFolder.AllTasks.Any(t => t.Name == taskName);
+                    return taskExists || ServiceManager.IsAutoStart();
+                }
             }
             catch (Exception e)
             {
@@ -28,7 +33,36 @@ namespace MSIFlux.GUI.Helpers
             }
         }
 
-        public static void Schedule()
+        public static bool Schedule()
+        {
+            // 计划任务写入系统 RootFolder 需要管理员权限, 服务启动类型切换也需要提权.
+            // 通过提权子进程一次性完成, 不退出当前程序.
+            if (!ProcessHelper.IsUserAdministrator())
+            {
+                int code = ServiceManager.RelaunchElevated("--enable-autostart");
+                return code == 0;
+            }
+
+            DoSchedule();
+            TrySetServiceAutoStart(true);
+            return true;
+        }
+
+        public static bool UnSchedule()
+        {
+            if (!ProcessHelper.IsUserAdministrator())
+            {
+                int code = ServiceManager.RelaunchElevated("--disable-autostart");
+                return code == 0;
+            }
+
+            DoUnSchedule();
+            TrySetServiceAutoStart(false);
+            return true;
+        }
+
+        /// <summary>实际创建计划任务 (调用方必须已提权).</summary>
+        internal static void DoSchedule()
         {
             using (TaskDefinition td = TaskService.Instance.NewTask())
             {
@@ -37,9 +71,9 @@ namespace MSIFlux.GUI.Helpers
                 // 添加 --silent 参数，开机自启时静默运行
                 td.Actions.Add(new ExecAction(strExeFilePath, "--silent"));
 
+                // GUI 以普通用户身份运行 (asInvoker), 计划任务也应以普通用户身份运行.
                 td.Principal.LogonType = TaskLogonType.InteractiveToken;
-                if (ProcessHelper.IsUserAdministrator())
-                    td.Principal.RunLevel = TaskRunLevel.Highest;
+                td.Principal.RunLevel = TaskRunLevel.LUA;
 
                 td.Settings.StopIfGoingOnBatteries = false;
                 td.Settings.DisallowStartIfOnBatteries = false;
@@ -48,34 +82,51 @@ namespace MSIFlux.GUI.Helpers
                 try
                 {
                     TaskService.Instance.RootFolder.RegisterTaskDefinition(taskName, td);
+                    Logger.WriteLine("Startup task scheduled: " + strExeFilePath);
                 }
                 catch (Exception e)
                 {
-                    if (ProcessHelper.IsUserAdministrator())
-                        MessageBox.Show("Can't create a start up task. Try running Task Scheduler by hand and manually deleting MSIFlux task if it exists there.", "Scheduler Error", MessageBoxButtons.OK);
-                    else
-                        ProcessHelper.RunAsAdmin();
+                    Logger.WriteLine("Can't create startup task: " + e.Message);
                 }
-
-                Logger.WriteLine("Startup task scheduled: " + strExeFilePath);
             }
         }
 
-        public static void UnSchedule()
+        /// <summary>实际删除计划任务 (调用方必须已提权).</summary>
+        internal static void DoUnSchedule()
         {
             using (TaskService taskService = new TaskService())
             {
                 try
                 {
                     taskService.RootFolder.DeleteTask(taskName);
+                    Logger.WriteLine("Startup task removed.");
                 }
                 catch (Exception e)
                 {
-                    if (ProcessHelper.IsUserAdministrator())
-                        MessageBox.Show("Can't remove task. Try running Task Scheduler by hand and manually deleting MSIFlux task if it exists there.", "Scheduler Error", MessageBoxButtons.OK);
-                    else
-                        ProcessHelper.RunAsAdmin();
+                    Logger.WriteLine("Can't remove startup task: " + e.Message);
                 }
+            }
+        }
+
+        /// <summary>
+        /// 设置 Windows 服务的启动类型. 当前进程若未提权, 则通过 UAC 提权子进程执行.
+        /// </summary>
+        private static void TrySetServiceAutoStart(bool auto)
+        {
+            try
+            {
+                if (ServiceManager.IsCurrentProcessElevated())
+                {
+                    ServiceManager.SetStartType(auto);
+                }
+                else
+                {
+                    ServiceManager.RelaunchElevated(auto ? "--service-autostart" : "--service-manual");
+                }
+            }
+            catch (Exception e)
+            {
+                Logger.WriteLine("Failed to set service auto start: " + e.Message);
             }
         }
     }

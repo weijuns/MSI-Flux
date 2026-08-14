@@ -25,6 +25,17 @@ namespace MSIFlux.GUI.Helpers
         {
             try
             {
+                // 诊断: 记录 RunAsAdmin 调用来源
+                try
+                {
+                    var path = System.IO.Path.Combine(MSIFlux.Common.Paths.Logs, "diag_ensure.txt");
+                    var stack = new System.Diagnostics.StackTrace(1, true);
+                    var frame = stack.GetFrame(0);
+                    System.IO.File.AppendAllText(path,
+                        $"[{DateTime.Now:HH:mm:ss.fff}] RunAsAdmin 被调用, 来源: {frame?.GetMethod()?.DeclaringType?.Name}.{frame?.GetMethod()?.Name}\r\n");
+                }
+                catch { }
+
                 ProcessStartInfo proc = new ProcessStartInfo
                 {
                     UseShellExecute = true,

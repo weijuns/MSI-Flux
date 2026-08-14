@@ -3,7 +3,7 @@
 ## 📌 项目基本信息
 - **项目名称**: MSI Flux (位于 `c:\Users\wjs\Desktop\YAMDCC\MSI Flux`)
 - **适用机型示例**: 微星绝影 14 (Stealth 14, EC 固件版本 `14K1EMS1.108`) 及微星全系笔记本
-- **最新发布版本**: `v1.6.0` (独立单文件 `MSI Flux.exe` 约 20.4MB)
+- **最新发布版本**: `v1.6.1` (独立单文件 `MSI Flux.exe` 约 15MB)
 
 ---
 
@@ -29,8 +29,8 @@
   - 绝影 14 的 EC 硬件降温退档 (DownThreshold) 需要**绝对温度值**（如 46°C），而非相对温差（如 4°C）。
   - 全局配置 `OffsetDT = false`，禁止计算温差 offset，直接下发绝对退档温度，彻底解决降温时风扇狂转不退档问题。
 - **通信路径**:
-  - 优先通过 WMI ACPI Payload 写入：`Set_Temperature` (14)、`Set_Fan` (18)、`Set_Thermal` (16)。
-  - 若无 WMI 驱动则自动平滑降级至 Direct EC 改写。
+  - 优先通过 WMI ACPI Payload 写入：`Set_Temperature` (14)、`Set_Fan` (18)。**不再写 `Set_Thermal`** (官方 Feature Manager 只写前两者，软件层写入热偏移会导致退档偏置错误 → 风扇暴转 5000+ RPM)。
+  - 若无 WMI 驱动则自动平滑降级至 Direct EC 改写，Direct EC 路径必须写 **DownThresholdRegs** (Down < Up 校验，越界回退 `UpThreshold - 4`)。
 - **阶梯式默认风扇曲线矩阵**:
   - 同等温度下风量与转速大小严格保持：`省电` < `静音` < `平衡 (微星原厂)` < `增强 (极速)`。
   - **平衡模式原厂参数**:

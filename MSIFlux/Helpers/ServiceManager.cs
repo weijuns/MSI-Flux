@@ -226,6 +226,39 @@ internal static class ServiceManager
         }
     }
 
+    /// <summary>
+    /// 设置服务的启动类型.
+    /// </summary>
+    /// <param name="auto">true 为自动启动 (开机自启), false 为手动 (不自动启动).</param>
+    public static bool SetStartType(bool auto)
+    {
+        if (!IsCurrentProcessElevated())
+        {
+            Debug.WriteLine("[ServiceManager] SetStartType() 需要管理员权限");
+            return false;
+        }
+
+        if (!IsInstalled()) return false;
+
+        string mode = auto ? "auto" : "demand";
+        int code = RunSc($"config {ServiceName} start= {mode}");
+        return code == 0;
+    }
+
+    /// <summary>查询服务当前是否为自动启动.</summary>
+    public static bool IsAutoStart()
+    {
+        try
+        {
+            using var sc = new ServiceController(ServiceName);
+            return sc.StartType == ServiceStartMode.Automatic;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     /// <summary>停止并卸载服务.</summary>
     public static bool Uninstall()
     {
@@ -383,6 +416,17 @@ internal static class ServiceManager
     {
         try
         {
+            // 诊断: 任何提权调用都记录调用来源 (栈信息), 定位 UAC 触发点
+            try
+            {
+                var path = Path.Combine(MSIFlux.Common.Paths.Logs, "diag_ensure.txt");
+                var stack = new System.Diagnostics.StackTrace(1, true);
+                var frame = stack.GetFrame(0);
+                System.IO.File.AppendAllText(path,
+                    $"[{DateTime.Now:HH:mm:ss.fff}] RelaunchElevated('{arg}') 被调用, 调用来源: {frame?.GetMethod()?.DeclaringType?.Name}.{frame?.GetMethod()?.Name}\r\n");
+            }
+            catch { }
+
             var psi = new ProcessStartInfo
             {
                 FileName = GetExecutablePath(),

@@ -178,6 +178,14 @@ Write flow: `EC.WriteByte(Reg, Value)` → WinRing0 driver → EC hardware → B
 
 ## 📅 Changelog
 
+### v1.6.1 (2026-08-14)
+- 🚫 **Fixed UAC popup on double-click / auto-start at boot**: Root cause was the Settings page initializing the "Auto-start" checkbox state in its constructor — assigning `Checked` accidentally fired the `CheckedChanged` event → re-triggered `Startup.Schedule()` → every launch prompted a UAC elevation. The initial assignment is now moved *before* event subscription so startup is completely prompt-free.
+- 🌀 **Fan overdrive fix (WMI path)**: Following the official Feature Manager, the WMI ACPI path now **skips `Set_Thermal`** (only `Set_Temperature` + `Set_Fan`). Previously the software-written thermal offset was misinterpreted by the BIOS as an absolute temperature, causing 5000+ RPM fan overdrive at 53°C. The Direct EC path re-adds **DownThresholdRegs** writes with a safety check (`Down < Up`, fallback `UpThreshold - 4`) to prevent inverted hysteresis triggering hardware thermal shutdown.
+- 🛡️ **Official MSI service coexistence guard**: When MSI Center / Feature Manager services are detected running, EC hotkey polling is skipped — `EC[0xC1]` is no longer force-written every 400 ms (only enabled once on first run or if bit7 is unexpectedly cleared), and the EC hardware sync timer was relaxed from 500 ms to **2000 ms**, avoiding register write conflicts that caused forced system power-off.
+- ⚙️ **One-click auto-start toggle via elevation**: The "Auto-start" switch now performs both Task Scheduler (`RunLevel=LUA`) registration and service start type (auto/manual) switching through a single elevated child process, without exiting the app; the checkbox rolls back if UAC is cancelled.
+- 🔧 **More tolerant service startup**: Service start timeout raised 10s → 15s plus an additional 15s grace period; on failure the app **no longer prompts UAC** and continues running in degraded mode.
+- 📷 **F6 camera OSD stability**: Restored `CamGuid` device-GUID filtering, removed `DEVICE_NOTIFY_ALL_INTERFACE_CLASSES` and the redundant dedup counters, fixing occasional missing/duplicate toasts.
+
 ### v1.6.0 (2026-08-07)
 - 🛡️ **Service SDDL Authorization & Seamless Double-click Self-healing**: Resolved the issue where double-clicking under standard user rights prompted "Service Not Running". Granted full `CCLCSWRPWPDTLOCRRC` start and control permissions to `Authenticated Users` (`AU`) via `sc.exe sdset` with quotes validation and retry routines.
 - 💡 **Physical Key LED Direct EC Fallback**: Refactored F1 (Audio Mute) and F5 (Mic Mute) LED controls. In addition to `MSI_ACPI` / `MSI_ACPI2` WMI polling, introduced direct bit manipulation on EC physical registers `0x2C` (Mic) and `0x2D` (Audio) so physical LEDs light up cleanly even without official WMI drivers.

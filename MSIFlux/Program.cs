@@ -87,6 +87,17 @@ namespace MSIFlux.GUI
         {
             try
             {
+                // 极早诊断: 确认进程是否以提权方式启动 (UAC 若在进程启动前触发, 这里可能根本到不了)
+                try
+                {
+                    var diagPath = Path.Combine(MSIFlux.Common.Paths.Logs, "diag_ensure.txt");
+                    using (var sw = System.IO.File.AppendText(diagPath))
+                    {
+                        sw.WriteLine($"[{DateTime.Now:HH:mm:ss.fff}] Main() 进入, args=[{string.Join(" ", args)}], elevated={ServiceManager.IsCurrentProcessElevated()}");
+                    }
+                }
+                catch { }
+
                 if (args.Contains("--service"))
                 {
                     return RunAsService();
@@ -105,6 +116,26 @@ namespace MSIFlux.GUI
                 if (args.Contains("--uninstall-service"))
                 {
                     return UninstallServiceEntry();
+                }
+
+                if (args.Contains("--service-autostart"))
+                {
+                    return SetServiceAutoStartEntry(true);
+                }
+
+                if (args.Contains("--service-manual"))
+                {
+                    return SetServiceAutoStartEntry(false);
+                }
+
+                if (args.Contains("--enable-autostart"))
+                {
+                    return SetAutoStartEntry(true);
+                }
+
+                if (args.Contains("--disable-autostart"))
+                {
+                    return SetAutoStartEntry(false);
                 }
 
                 return RunAsGui(args);
@@ -203,6 +234,42 @@ namespace MSIFlux.GUI
             return ServiceManager.Stop(TimeSpan.FromSeconds(15)) ? 0 : 3;
         }
 
+        private static int SetServiceAutoStartEntry(bool auto)
+        {
+            if (!ServiceManager.IsCurrentProcessElevated()) return 2;
+            return ServiceManager.SetStartType(auto) ? 0 : 3;
+        }
+
+        /// <summary>
+        /// 提权子进程入口: 一次性完成 计划任务 + 服务启动类型 的设置.
+        /// 由 GUI 点击开机自启开关时通过 UAC 提权调用.
+        /// </summary>
+        private static int SetAutoStartEntry(bool enable)
+        {
+            if (!ServiceManager.IsCurrentProcessElevated()) return 2;
+
+            int code = 0;
+            try
+            {
+                if (enable)
+                {
+                    MSIFlux.GUI.Helpers.Startup.DoSchedule();
+                    if (!ServiceManager.SetStartType(true)) code = 3;
+                }
+                else
+                {
+                    MSIFlux.GUI.Helpers.Startup.DoUnSchedule();
+                    if (!ServiceManager.SetStartType(false)) code = 3;
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[AutoStartEntry] 失败: {ex.Message}");
+                code = 4;
+            }
+            return code;
+        }
+
         // ================================================================
         // 角色 3: GUI (默认)
         // ================================================================
@@ -210,6 +277,14 @@ namespace MSIFlux.GUI
         {
             bool isRestart = args.Contains("--restart");
             bool silentMode = args.Contains("--silent");
+
+            // 诊断: 记录启动参数与静默模式, 用于排查开机自启是否误触发提权
+            var _bootLog = new MSIFlux.Common.Logs.Logger { LogDir = MSIFlux.Common.Paths.Logs, LogName = "GUI" };
+            try
+            {
+                _bootLog.Info($"[GUI] 启动: silent={silentMode}, args=[{string.Join(" ", args)}], elevated={ServiceManager.IsCurrentProcessElevated()}");
+            }
+            catch { }
 
             if (isRestart)
             {
@@ -422,9 +497,12 @@ namespace MSIFlux.GUI
             // 顺带检测 MSI 官方服务冲突 (保留既有行为但更温和: 只检测不强杀)
             WarnIfMSIServicesRunning();
 
+            DiagEnsure($"EnsureServiceReady 开始: silent={silent}");
+
             // 1. 未安装 → 提权安装
             if (!ServiceManager.IsInstalled())
             {
+                DiagEnsure($"分支1 未安装, silent={silent}");
                 if (silent)
                 {
                     // 静默启动 (开机自启场景) 下不弹 UAC, 等用户交互时再说
@@ -456,6 +534,7 @@ namespace MSIFlux.GUI
             }
             else if (ServiceManager.IsServicePathOutOfDate())
             {
+                DiagEnsure($"分支2 路径过期, silent={silent}");
                 // 软件被移动过. 提示用户重装.
                 if (!silent)
                 {
@@ -471,6 +550,7 @@ namespace MSIFlux.GUI
             }
             else if (!ServiceManager.HasNonAdminStartPermission())
             {
+                DiagEnsure($"分支3 无普通用户启动权限, silent={silent}");
                 // 服务已装且路径正确, 但 SDDL 权限不对.
                 // 普通用户双击 exe 时无法启动服务 (SCM 返回 拒绝访问).
                 if (!silent)
@@ -487,19 +567,45 @@ namespace MSIFlux.GUI
             }
 
             // 2. 已装但没跑 → 启动
+            DiagEnsure($"进入启动检查: running={ServiceManager.IsRunning()}");
             if (!ServiceManager.IsRunning())
             {
-                if (!ServiceManager.Start(TimeSpan.FromSeconds(10)))
+                // 服务启动可能较慢 (加载 WinRing0 驱动 / 写入 EC 寄存器), 首次 Start 给足 15s
+                DiagEnsure($"尝试启动服务...");
+                bool started = ServiceManager.Start(TimeSpan.FromSeconds(15));
+                DiagEnsure($"Start() 结果: {started}, running={ServiceManager.IsRunning()}");
+                if (!started)
                 {
-                    // 启动失败可能是权限问题, 再试一次提权
-                    if (!silent)
-                    {
-                        ServiceManager.RelaunchElevated("--install-service");
-                    }
+                    // 再宽限 15s, 避免启动慢导致误判失败而弹 UAC
+                    started = ServiceManager.WaitUntilRunning(TimeSpan.FromSeconds(15));
+                    DiagEnsure($"宽限等待后: {started}");
                 }
+
+                if (!started && !silent)
+                {
+                    // 已装、路径正确、权限正确, 但服务确实无法启动:
+                    // 不弹 UAC, 让软件以降级模式运行, 用户可在设置页手动处理
+                    DiagEnsure("服务启动失败 (非权限问题), 降级运行, 不弹 UAC");
+                }
+            }
+            else
+            {
+                DiagEnsure("服务已在运行");
             }
 
             return ServiceManager.WaitUntilRunning(TimeSpan.FromSeconds(10));
+        }
+
+        /// <summary>把 EnsureServiceReady 的每个分支写到一个固定诊断文件, 便于排查 UAC 触发点.</summary>
+        private static void DiagEnsure(string msg)
+        {
+            try
+            {
+                var dir = Path.Combine(MSIFlux.Common.Paths.Logs, "..", "Logs");
+                string path = Path.Combine(MSIFlux.Common.Paths.Logs, "diag_ensure.txt");
+                System.IO.File.AppendAllText(path, $"[{DateTime.Now:HH:mm:ss.fff}] {msg}\r\n");
+            }
+            catch { }
         }
 
         /// <summary>
