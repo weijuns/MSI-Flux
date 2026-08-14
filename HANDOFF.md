@@ -137,6 +137,8 @@
 | 4 | 禁用 InformationalVersion 附加 git hash: `IncludeSourceRevisionInInformationalVersion=false` | `MSIFlux.csproj` |
 
 > **版本发布约定**: 改版本号只需修改 `MSIFlux.csproj` 的 `<Version>` 一处 (FileVersion 若需去掉 .0 尾巴则同步修改相邻的 `<FileVersion>`). 发布流程: `dotnet publish MSIFlux/MSIFlux.csproj -c Release -o publish-r2r -r win-x64 /p:PublishSingleFile=true /p:DebugType=none /p:PublishReadyToRun=true` → `git tag` → `gh release create`。
+>
+> **产物复制约定**: 每次编译完成后, 将产物 `MSI Flux.exe` 复制一份到 `C:\Users\wjs\Desktop\MSI Flux\` (桌面独立目录, 供直接使用).
 
 ---
 
