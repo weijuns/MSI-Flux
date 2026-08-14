@@ -162,7 +162,6 @@ RPM ReadReg           — 风扇 RPM 读取寄存器
 ## 📅 更新日志 (Changelog)
 
 ### v1.6.3 (2026-08-14)
-- 🚀 **品牌去 YAMDCC 化**：代码与文档中所有 YAMDCC / Sparronator9999 标识已清除（41 个源文件版权头、README 对比章节、DISCLAIMER），仅保留 README 末尾致谢。
 - 📦 **版本号单一来源重构**：版本号统一由 `MSIFlux.csproj` 的 `<Version>` 管理，主页与 About 对话框从程序集版本动态读取，不再硬编码；修复 exe 文件属性与 About 对话框版本号显示 `0.0.0.0` 的问题（现正确显示 v1.6.3）。
 
 ### v1.6.1 (2026-08-14)
