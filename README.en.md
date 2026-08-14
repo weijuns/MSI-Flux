@@ -157,6 +157,11 @@ Write flow: `EC.WriteByte(Reg, Value)` → WinRing0 driver → EC hardware → B
 
 ## 📅 Changelog
 
+### v1.6.4 (2026-08-14)
+- ⚡ **CPU Power Display** — Real-time CPU package power via the RAPL MSR energy counter; the homepage CPU line now shows `CPU: 85°C 3500 RPM 45W`. Automatically hidden when the driver is unavailable or the platform lacks RAPL support.
+- 🔄 **IPC Version Negotiation** — On startup the GUI checks the background service version and warns when it mismatches the app version (or the service is too old), preventing silent command failures.
+- 🧹 **Build Warning Cleanup** — Fixed missing assembly platform attributes that caused 1651 CA1416 warnings (release builds now emit only a few NuGet notices).
+
 ### v1.6.3 (2026-08-14)
 - 📦 **Single-source versioning** — The version is now managed solely by `<Version>` in `MSIFlux.csproj`; the homepage and About dialog read the version dynamically from the assembly instead of hardcoding. Fixed exe file properties and About dialog showing `0.0.0.0` (now correctly shows v1.6.3).
 
