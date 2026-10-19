@@ -120,7 +120,15 @@ internal static class UefiVariable
         // Clear bits 0-3 (requested mode in 0-1, actual mode in 2-3).
         // Clearing bits 2-3 ensures the value always differs from before,
         // so the BIOS will re-process the MUX request on POST.
-        byte cleared = (byte)(before & 0xF0);
+        //
+        // ⚠️ 掩码必须是 0xFC 而不是 0xF0. MSI 官方 Feature Manager、MControl、
+        //    BabaConsole 三个独立实现全部用 & 0xFC:
+        //      case 0: array[5] &= 0xFC;                    // Hybrid
+        //      case 1: array[5] = (array[5] & 0xFC) | 1;    // Discrete
+        //      case 2: array[5] = (array[5] & 0xFC) | 2;    // Eco/UMA
+        //    bit4 是 "NewGPU 支持位"（BIOS 探测后置位，已稳定锁定）。
+        //    用 0xF0 会把该位一并清掉，等于抹掉 BIOS 的确认状态。
+        byte cleared = (byte)(before & 0xFC);
         byte after = mode switch
         {
             1 => (byte)(cleared | 0x01),  // Discrete
@@ -141,4 +149,92 @@ internal static class UefiVariable
         if (data is null) return null;
         return data[5] & 0x03;
     }
+
+    // ==================================================================
+    // 机型 GPU 切换能力位（只读，不写任何 EC/UEFI）
+    //
+    // 数据来源: MsiDCVarData byte[5]
+    //   来源交叉验证:
+    //   Feature Manager Service/API_Dynamic/WinAndFnChange.cs:92-112
+    //   MControl.Core/MsiGpuModeController.cs:56-60
+    //   BabaConsole.Core.MsiGpuModeController.cs:70-82
+    // ==================================================================
+
+    /// <summary>机型 GPU 切换能力位。</summary>
+    public readonly record struct GpuCapabilities(
+        bool Available,            // 是否成功读到变量
+        int RequestedMode,         // bit0-1
+        int CurrentMode,           // bit2-3
+        bool SupportsNewGpuSwitch, // bit4
+        bool SupportsUma,          // bit5
+        bool SupportsDiscrete,     // bit6 == 0 时为 true
+        byte RawByte)
+    {
+        /// <summary>读失败时的占位值: 不声明任何能力.</summary>
+        public static GpuCapabilities Unavailable => new(false, -1, -1, false, false, false, 0);
+    }
+
+    /// <summary>
+    /// 读取 MsiDCVarData byte[5] 的能力位。
+    ///
+    /// 关键语义 (易错点, 与 MControl/BabaConsole 逐位一致):
+    ///   bit4 置位 → 支持新 EC 显卡切换
+    ///   bit5 置位 → 支持 UMA(核显) 切换
+    ///   bit6 置位 → 【不支持】独显切换 (即 SupportsDiscrete = (bit6 == 0))
+    ///               官方源码: if ((num &amp; 0x40) == 0) isSupport_Discrete_Switch = true;
+    /// </summary>
+    public static GpuCapabilities ReadGpuCapabilities(Logger? log = null)
+    {
+        var (data, size, _) = ReadMsiDCVarData(log);
+        if (data is null || size <= 5)
+        {
+            log?.Debug($"MsiDCVarData 不可读 (size={size}), 无法获取机型能力位");
+            return GpuCapabilities.Unavailable;
+        }
+
+        byte b = data[5];
+        var caps = new GpuCapabilities(
+            Available: true,
+            RequestedMode: b & 0x03,
+            CurrentMode: (b & 0x0C) >> 2,
+            SupportsNewGpuSwitch: (b & 0x10) != 0,
+            SupportsUma: (b & 0x20) != 0,
+            SupportsDiscrete: (b & 0x40) == 0,
+            RawByte: b);
+
+        log?.Info($"MsiDCVarData[5]=0x{b:X2} → 能力: NewGpuSwitch={caps.SupportsNewGpuSwitch}, " +
+                  $"UMA={caps.SupportsUma}, Discrete={caps.SupportsDiscrete}, " +
+                  $"请求模式={caps.RequestedMode}, 当前模式={caps.CurrentMode}");
+        return caps;
+    }
+
+    /// <summary>
+    /// 把能力位打包成 int, 便于经 IPC 传输:
+    ///   bit0-1 = RequestedMode, bit2-3 = CurrentMode,
+    ///   bit4   = Available, bit5 = SupportsNewGpuSwitch,
+    ///   bit6   = SupportsUma, bit7 = SupportsDiscrete,
+    ///   bit8-15 = RawByte
+    /// </summary>
+    public static int PackCapabilities(in GpuCapabilities c)
+    {
+        int v = 0;
+        v |= c.RequestedMode & 0x03;
+        v |= (c.CurrentMode & 0x03) << 2;
+        if (c.Available) v |= 1 << 4;
+        if (c.SupportsNewGpuSwitch) v |= 1 << 5;
+        if (c.SupportsUma) v |= 1 << 6;
+        if (c.SupportsDiscrete) v |= 1 << 7;
+        v |= (c.RawByte & 0xFF) << 8;
+        return v;
+    }
+
+    /// <summary>解包 <see cref="PackCapabilities"/>.</summary>
+    public static GpuCapabilities UnpackCapabilities(int packed) => new(
+        Available: (packed & (1 << 4)) != 0,
+        RequestedMode: packed & 0x03,
+        CurrentMode: (packed >> 2) & 0x03,
+        SupportsNewGpuSwitch: (packed & (1 << 5)) != 0,
+        SupportsUma: (packed & (1 << 6)) != 0,
+        SupportsDiscrete: (packed & (1 << 7)) != 0,
+        RawByte: (byte)((packed >> 8) & 0xFF));
 }

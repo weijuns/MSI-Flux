@@ -22,9 +22,22 @@ publish-launcher/
 publish_direct/
 publish_framework/
 publish-r2r/
+publish-deploy/
 
 ## Temp
 .workbuddy/
 FnKeyDiag/
 *.bat
 
+
+## Publish (new)
+publish_c/
+
+## Local agent/tooling state
+.claude/
+.release-check/
+.agents/
+
+## Utility scripts (local only)
+query
+stop

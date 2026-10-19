@@ -101,6 +101,27 @@ public sealed class MSIFlux_Config
     public bool OffsetDT { get; set; } = false;
 
     /// <summary>
+    /// 是否允许本程序写入 EC[0xC1] 的 bit7，开启「EC 热键调试模式」以轮询 Fn 热键。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// ⚠️ <b>默认 false。</b>
+    /// </para>
+    /// <para>
+    /// EC[0xC1] bit7 会把 EC 的键码上报从正常键盘通道切到调试通道。
+    /// 官方 MSI Center 在场时由它的服务做仲裁；一旦官方服务不在
+    /// （例如 MSI Center 已卸载），置位该位可能让<b>内置键盘失效</b>，
+    /// 且必须断电重置 EC 才能恢复。
+    /// </para>
+    /// <para>
+    /// 关闭时（默认）本程序只做<b>只读轮询</b>：不会写 EC[0xC1]，
+    /// 若该位已被其它程序置位则照常读取，不会被本程序清除。
+    /// </para>
+    /// </remarks>
+    [XmlElement]
+    public bool EnableEcHotkeyPolling { get; set; } = false;
+
+    /// <summary>
     /// The list of <see cref="FanConf"/>s associated with the laptop.
     /// </summary>
     [XmlArray]

@@ -161,6 +161,20 @@ RPM ReadReg           — 风扇 RPM 读取寄存器
 
 ## 📅 更新日志 (Changelog)
 
+### v1.6.7 (2026-10-20)
+- 🎯 **机型自动判定**：首次运行时按 `机箱类型 + 主板厂商 + CPU 代际 + 风扇数` 三层匹配内置配置，不再固定用 Generic。本机（Stealth 14Studio A13VF）实测正确识别为 13 代 + 双风扇。**只在 `CurrentConfig.xml` 不存在时生效，用户已有配置永不被覆盖。**
+- 🔧 **`WritePerfMode` 官方掩码**：`EC[0xD2]` 改用 `((cur & 0xC3) | 0xC0) & 0xFC | (target & 0x07)` 掩码写入（保留 bit0/bit1 语义位，强制 bit6/bit7），并加读-比较-写与回读确认。
+- 🔒 **EC 热键调试模式默认关闭**：新增配置项 `EnableEcHotkeyPolling`（默认 `false`）。关闭时只做只读轮询，不再主动写 `EC[0xC1]` bit7；服务启动/停止时自动清理残留 bit7。
+
+### v1.6.6 (2026-10-20)
+- 🧩 **`EC[0xE8]` 读-比较-写**：Win/Fn 交换设置改为先读后写，值相同时跳过；不同时只改 bit4（与官方写掩码一致），避免高频重复写键盘敏感寄存器。
+- 📊 **GPU 切换能力读取**：新增 `UefiVariable.GpuCapabilities`，从 `MsiDCVarData[5]` 解析 `NewGpuSwitch`(bit4) / `UMA`(bit5) / `Discrete`(bit6 取反)，纯只读。
+- 🧪 **测试扩充至 54 个**：新增机型判定 26 个、EC 寄存器安全 16 个。
+
+### v1.6.5 (2026-10-20)
+- 🔧 **UEFI 掩码修复 `0xF0` → `0xFC`**：GPU 模式切换时清 `MsiDCVarData[5]` 保留 bit4（BIOS 的 NewGPU 支持位），与 MSI 官方 Feature Manager / MControl / BabaConsole 三处实现一致。旧版用 `0xF0` 会抹掉该确认状态。
+- 🔒 **`ApplyConf` 重入锁**：加 `Monitor.TryEnter`，防止服务启动 / IPC / 热键 / 唤醒事件并发触发时对同一批 EC 寄存器高频重复写入。
+
 ### v1.6.4 (2026-08-14)
 - ⚡ **CPU 功耗显示**：基于 RAPL MSR（Intel 能量计数器）实时读取 CPU Package 功耗，主界面 CPU 状态显示 `CPU: 85°C 3500 RPM 45W`；驱动不可用或平台不支持时自动隐藏。
 - 🔄 **IPC 版本协商**：GUI 启动时自动检测后台服务版本，与程序版本不一致（或服务过旧）时弹窗提示，避免新旧版本命令静默失败。

@@ -166,6 +166,11 @@ internal sealed partial class FanControlService : ServiceBase
                 ApplyConf();
             }
 
+            // ⚠️ 启动自检：若上个进程异常退出，EC[0xC1] bit7 可能残留为 1
+            //    （EC 热键调试模式），这会让内置键盘失效。
+            //    这里在启动时主动清一次，恢复正常键盘通道。
+            EnsureHotkeyDebugDisabled();
+
             // 启动 EC 热键调试模式 + 400ms 轮询 EC[0xC0] (检测 Fn+F7 等硬件热键)
             StartHotkeyPoller();
 
@@ -214,6 +219,11 @@ internal sealed partial class FanControlService : ServiceBase
         StopHotkeyPoller();
         StopWmiHotkeyWatcher();
         StopEcSyncTimer();
+
+        // ⚠️ 关键清理：若本服务曾置位 EC[0xC1] bit7（EC 热键调试模式），
+        //    退出前必须清掉，否则 EC 停留在调试模式，内置键盘在服务停止后仍然失效。
+        //    必须在 UnloadDriver 之前执行。
+        EnsureHotkeyDebugDisabled();
 
         // Stop the IPC server:
         Log.Info("Stopping IPC server...");
@@ -643,6 +653,12 @@ internal sealed partial class FanControlService : ServiceBase
         }
     }
 
+    /// <summary>
+    /// ApplyConf 的重入锁。无此锁时，服务启动 + IPC ApplyConf + 热键触发
+    /// + 唤醒事件可能同时进入，造成对同一批 EC 寄存器的高频并发写入。
+    /// </summary>
+    private readonly object _applyConfLock = new();
+
     private bool ApplyConf()
     {
         if (Config is null)
@@ -650,6 +666,25 @@ internal sealed partial class FanControlService : ServiceBase
             return false;
         }
 
+        // 并发保护: 已在应用配置时直接返回, 避免重复写 EC
+        if (!System.Threading.Monitor.TryEnter(_applyConfLock))
+        {
+            Log.Debug("ApplyConf 已在进行中, 跳过本次重复调用");
+            return true;
+        }
+
+        try
+        {
+            return ApplyConfCore();
+        }
+        finally
+        {
+            System.Threading.Monitor.Exit(_applyConfLock);
+        }
+    }
+
+    private bool ApplyConfCore()
+    {
         Log.Info(Strings.GetString("cfgApplying"));
         bool success = true;
 
@@ -763,7 +798,7 @@ internal sealed partial class FanControlService : ServiceBase
                     Log.Info(Strings.GetString("svcWritePerfMode"));
                     int idx = pModeCfg.ModeSel;
 
-                    if (!LogECWriteByte(pModeCfg.Reg, pModeCfg.PerfModes[idx].Value))
+                    if (!WritePerfMode(pModeCfg, idx))
                     {
                         success = false;
                     }
@@ -805,11 +840,94 @@ internal sealed partial class FanControlService : ServiceBase
         return success;
     }
 
+    /// <summary>
+    /// 写入性能模式寄存器（默认 EC 0xD2）。
+    ///
+    /// 旧实现直接整字节写配置值。但 EC 0xD2 不是纯数据寄存器，
+    /// 它的 bit0/bit1 与「Shift 模式」状态机耦合，直接覆盖整字节
+    /// 可能把固件内部状态机写到非法组合。
+    ///
+    /// 官方 MSI 的写掩码是：((cur &amp; 0xC3) | 0xC0) &amp; 0xFC | (target &amp; 7)
+    ///   - 保留 bit0/bit1 的既有语义位
+    ///   - 强制 bit7/bit6 = 1（表示"手动/已配置"）
+    ///   - 清 bit2-5，再填入 target 的低 3 位
+    ///
+    /// 同时加读-比较-写：值相同就不碰 EC。
+    /// </summary>
+    private bool WritePerfMode(PerfModeConf cfg, int modeIndex)
+    {
+        if (cfg.PerfModes is null || modeIndex < 0 || modeIndex >= cfg.PerfModes.Count)
+        {
+            Log.Warn($"性能模式索引 {modeIndex} 越界，跳过写入");
+            return false;
+        }
+
+        byte target = cfg.PerfModes[modeIndex].Value;
+
+        if (!_EC.ReadByte(cfg.Reg, out byte cur))
+        {
+            Log.Warn($"EC[0x{cfg.Reg:X2}] 读取失败，跳过性能模式写入（避免盲目覆盖）");
+            return false;
+        }
+
+        // 官方掩码：保留 bit0/bit1，强制 bit7/bit6=1，bit2-5 由 target 低 3 位决定
+        byte masked = (byte)(((cur & 0xC3) | 0xC0) & 0xFC | (target & 0x07));
+
+        if (masked == cur)
+        {
+            Log.Debug($"EC[0x{cfg.Reg:X2}] 已是 0x{cur:X2}（目标 {cfg.PerfModes[modeIndex].Name}），跳过写入");
+            return true;
+        }
+
+        Log.Info($"EC[0x{cfg.Reg:X2}] 性能模式: 0x{cur:X2} → 0x{masked:X2} " +
+                 $"({cfg.PerfModes[modeIndex].Name}, target=0x{target:X2})");
+
+        if (!LogECWriteByte(cfg.Reg, masked))
+        {
+            return false;
+        }
+
+        // 回读确认
+        if (_EC.ReadByte(cfg.Reg, out byte after) && after != masked)
+        {
+            Log.Warn($"EC[0x{cfg.Reg:X2}] 回读不一致: 期望 0x{masked:X2}, 实际 0x{after:X2}");
+        }
+        return true;
+    }
+
     private bool SetWinFnSwap(KeySwapConf cfg)
     {
         Log.Info(Strings.GetString("svcWriteKeySwap"));
-        return LogECWriteByte(cfg.Reg,
-            cfg.Enabled ? cfg.OnVal : cfg.OffVal);
+
+        byte target = cfg.Enabled ? cfg.OnVal : cfg.OffVal;
+
+        // 读-比较-写：
+        //   旧实现无条件写 0xE8。ApplyConf 被热键/GUI/唤醒多次触发时，
+        //   会造成对同一寄存器的高频重复写入。EC 固件对键盘相关寄存器的
+        //   高频写很敏感。
+        //   现在先读，值相同就不写；不同则只改 bit4，保留其它位
+        //   （与 MSI Center 官方写掩码一致）。
+        if (_EC.ReadByte(cfg.Reg, out byte cur))
+        {
+            if (cur == target)
+            {
+                Log.Debug($"EC[0x{cfg.Reg:X2}] 已是 0x{target:X2}, 跳过重复写入");
+                return true;
+            }
+
+            byte masked = (byte)((cur & ~0x10) | (target & 0x10));
+            if (masked == cur)
+            {
+                Log.Debug($"EC[0x{cfg.Reg:X2}] bit4 已符合目标值 0x{target:X2}, 跳过写入");
+                return true;
+            }
+            Log.Info($"EC[0x{cfg.Reg:X2}]: 0x{cur:X2} → 0x{masked:X2} (KeySwap={(cfg.Enabled ? "on" : "off")})");
+            return LogECWriteByte(cfg.Reg, masked);
+        }
+
+        // 读失败时退回整字节写（保持旧行为，避免此路径变成不可用）
+        Log.Warn($"EC[0x{cfg.Reg:X2}] 读取失败, 直接写入 0x{target:X2}");
+        return LogECWriteByte(cfg.Reg, target);
     }
 
     private bool GetFanSpeed(int clientId, int fan)
@@ -1428,26 +1546,46 @@ internal sealed partial class FanControlService : ServiceBase
     /// <summary>轮询回调: 读 EC[0xC0], 匹配编码 → 执行对应动作 (由 Task 循环调用)</summary>
     private int _hotkeyPollCount;
     private bool _hotkeyDebugEnabled;
+    private bool _hotkeyDebugWriteRefused;
+
     private void HotkeyPollElapsed()
     {
         try
         {
-            // 只在首次或 bit7 被意外清除时启用热键调试模式, 不每轮都强制写回
-            // 高频改写 EC[0xC1] 可能与 MSI Center 产生寄存器冲突导致 EC 层强制断电
+            // ⚠️ 安全约束：
+            //   EC[0xC1] bit7 = EC 热键调试模式使能位。置位会让内置键盘失效，
+            //   且必须断电重置 EC 才能恢复。
+            //   旧实现无条件置 bit7；现在默认只做只读轮询，
+            //   只有显式开启 EnableEcHotkeyPolling 时才允许写入。
             if (!_EC.ReadByte(EC_HOTKEY_CTRL, out byte c1))
             {
                 if (++_hotkeyPollCount % 30 == 0)
                     Log.Warn($"Fn 热键: EC[0xC1] 读取失败 ({_hotkeyPollCount} 次)");
                 return;
             }
+
+            bool allowDebugWrite = Config?.EnableEcHotkeyPolling == true;
+
             if ((c1 & 0x80) == 0)
             {
+                if (!allowDebugWrite)
+                {
+                    if (!_hotkeyDebugWriteRefused)
+                    {
+                        _hotkeyDebugWriteRefused = true;
+                        Log.Info("Fn 热键: EC 调试模式保持关闭（未启用 EnableEcHotkeyPolling），" +
+                                 "仅做只读轮询，不会写入 EC[0xC1]");
+                    }
+                    return;
+                }
+
                 if (!_hotkeyDebugEnabled)
                 {
                     byte c1New = (byte)(c1 | 0x80);
                     _EC.WriteByte(EC_HOTKEY_CTRL, c1New);
                     _hotkeyDebugEnabled = true;
-                    Log.Info($"Fn 热键: 调试模式已开启 (EC[0xC1]: 0x{c1:X2} → 0x{c1New:X2})");
+                    Log.Warn($"Fn 热键: 调试模式已开启 (EC[0xC1]: 0x{c1:X2} → 0x{c1New:X2}) —— " +
+                             "官方 MSI 服务不在时，这可能使内置键盘失效！");
                 }
                 else
                 {

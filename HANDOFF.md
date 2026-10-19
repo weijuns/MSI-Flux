@@ -1,8 +1,96 @@
 # MSI Flux 交接文档
 
-**日期**: 2026-05-16 (更新)
+**日期**: 2026-10-20 (更新)
 **原作者**: Cascade + Claude (AI 辅助开发)
-**更新说明**: 修正过时的 Feature Manager 依赖描述, 与 README 和代码实际实现对齐
+**更新说明**: 新增 v1.6.5 / v1.6.6 / v1.6.7 增量移植记录（含 EC 寄存器安全加固）
+
+---
+
+## 零、v1.6.5 → v1.6.7 增量移植（2026-10-19/20）
+
+### 背景
+
+v1.7.0 ~ v1.7.5 引入了一批「贴近官方 MSI Center 实现」的改动，但在本机
+（Stealth 14Studio A13VF）上出现过内置键盘失效问题。排查后确认：
+**多数 `Enable*` 开关是 v1.7.0 自己引入问题后又加开关关掉的空壳。**
+
+因此决定以 v1.6.4 为基线，逐项移植有明确收益、低风险的改动，每项都实测键盘。
+
+### 移植清单
+
+| # | 项目 | 版本 | 说明 |
+|---|---|---|---|
+| 1 | UEFI 掩码 `0xF0` → `0xFC` | v1.6.5 | `MsiDCVarData[5]` 清位时保留 bit4（NewGPU 支持位） |
+| 2 | `ApplyConf` 重入锁 | v1.6.5 | `Monitor.TryEnter` 防止并发重复写 EC |
+| 3 | 机型自动判定 | v1.6.6 | `MachineProfile.cs`，三层匹配 |
+| 4 | `0xE8` 读-比较-写 | v1.6.6 | 值相同不写；不同则只改 bit4 |
+| 5 | GPU 能力读取 | v1.6.6 | `UefiVariable.GpuCapabilities`，纯只读 |
+| 6 | EC 热键安全默认值 | v1.6.7 | `EnableEcHotkeyPolling` 默认 false |
+| 7 | `WritePerfMode` 掩码 | v1.6.7 | `0xD2` 用官方掩码 + 读比较写 + 回读确认 |
+
+### 刻意未移植
+
+| 项目 | 原因 |
+|---|---|
+| `SetManualFanCurveEnable`（写 `0xD4` bit7） | 现有 `ApplyConf` 第 5 步已整字节写 `0x8D`，效果等效；多做反而多一次 WMI 调用 |
+| `WmiAcpi` 统一封装 | 本机 `MSI_ACPI` 有实例，硬编码 `SELECT * FROM MSI_ACPI` 已够用；`GpuSwitchService` 本来就有正确 flag 校验 |
+
+### 关键实测数据（供后续参考）
+
+**EC 寄存器基线（键盘正常时，服务运行中）**
+
+```
+EC[0xC1] = 0x80   (EC 热键调试模式已开启)
+EC[0xD2] = 0xC1   (Silent 性能模式)
+EC[0xD4] = 0x8D   (Advanced 风扇曲线，bit7=1)
+EC[0xD7] = 0xDA   (充电阈值 128+90)
+EC[0xE8] = 0x00   (Win/Fn 不交换)
+```
+
+> ⚠️ **重要更正**：早期分析曾认为 `0xD4` bit7 或 `0xC1` bit7 会导致键盘失效。
+> **实测证伪** —— v1.6.4 / v1.6.5 / v1.6.6 三次运行均在 `0xD4=0x8D`、
+> `0xC1=0x80` 状态下键盘完全正常（2294 / 223 / 353 个按键样本）。
+> 之前那次键盘失效的真实原因是**部署了 `publish_single` 里 `FileVersion 0.0.0.0`
+> 且缺失 SDDL 的坏构建**，导致 IPC 管道 ACL 错误、GUI 连不上服务。
+
+**WMI ACPI 实测布局（`Package_32`，含 flag）**
+
+```
+Get_AP(1)          = 01 8D 00 05 ...     [1] = 0xD4 当前值
+Get_AP(0)          = 01 00 00 C1 80 DA   [3]=0xD2  [4]=0xC1  [5]=0xD7
+Get_Fan(1)         = 01 3C 00 0A 0F 14 23 3C 55
+                     [1]=controlByte  [3..9]=曲线速度
+Get_Temperature(1) = 01 00 61 64 26 34 46 54 5C
+                     [1]=T0  [2]=T6  [3]=thermalLimit(0x64=100)
+```
+
+> `Get_AP(0)` 一次可读回 3 个寄存器，比逐字节 `ReadByte` 快，
+> 将来优化读取性能时可用。
+
+### 发布验证清单（每次发布必查）
+
+上次事故的教训：**部署前必须验证产物**，不能部署后才发现问题。
+
+```powershell
+# 1. 版本号
+(Get-Item "publish_c\MSI Flux.exe").VersionInfo.FileVersion   # 必须匹配 csproj
+
+# 2. SDDL（IPC 管道 ACL，缺失会导致 GUI 连不上服务）
+$u = [Text.Encoding]::Unicode.GetString([IO.File]::ReadAllBytes("publish_c\MSI Flux.exe"))
+$u.Contains('O:BAG:SYD')                                      # 必须 True
+
+# 3. 部署后立即测管道
+$p = [System.IO.Pipes.NamedPipeClientStream]::new(".", "MSIFlux-Server", 'InOut')
+$p.Connect(3000)                                              # 不抛异常
+```
+
+**校验和（v1.6.7 最终产物）**
+
+```
+大小   : 9,908,133 字节 (9.45 MB)
+版本   : 1.6.7
+MD5    : A4C1F60281EFDC90253A86943BBC96CA
+```
 
 ---
 

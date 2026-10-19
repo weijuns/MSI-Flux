@@ -1,4 +1,4 @@
-﻿// This file is part of MSIFlux.
+// This file is part of MSIFlux.
 // Copyright © 2026 weijuns.
 //
 // This program is free software: you can redistribute it and/or modify it
@@ -141,13 +141,33 @@ public static class Paths
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
             "MSI Flux", "Templates");
 
+    /// <summary>
+    /// 首次运行时的默认配置路径。
+    ///
+    /// 判定顺序：
+    ///   1. 按本机硬件画像 (机箱 + 厂商 + CPU 代际 + 风扇数) 分层匹配内置模板
+    ///   2. 匹配不到 → 回退到 Generic/10th-gen-dualfan.xml（旧行为）
+    ///
+    /// ⚠️ 只在 <see cref="EnsureCurrentConfigExists"/> 发现 CurrentConfig.xml
+    /// 不存在时才会被调用。用户已有的配置永远不会被覆盖。
+    /// </summary>
     public static string? DefaultConfigPath
     {
         get
         {
             EnsureTemplatesExtracted();
 
-            // 优先顺序: ProgramData 提取目录 -> exe 同级目录 (旧版布局兼容)
+            // 自动判定失败也不抛: 任何异常都回退到硬编码 Generic
+            string? auto = null;
+            try { auto = SelectConfigByProfile(); }
+            catch { /* 判定失败, 走兜底 */ }
+
+            if (!string.IsNullOrEmpty(auto) && File.Exists(auto))
+            {
+                return auto;
+            }
+
+            // 兜底: 原有硬编码路径 (保证任何情况下都能拿到一份可用配置)
             string[] possiblePaths = new string[]
             {
                 Path.Combine(Templates, "Generic", "MSI-10th-gen-or-newer-dualfan.xml"),
@@ -163,6 +183,43 @@ public static class Paths
             }
             return null;
         }
+    }
+
+    /// <summary>
+    /// 按本机硬件画像挑选内置配置文件完整路径。失败返回 null。
+    /// </summary>
+    private static string? SelectConfigByProfile()
+    {
+        if (!OperatingSystem.IsWindows()) return null;
+        if (!Directory.Exists(Templates)) return null;
+
+        // 枚举模板目录下的机型配置 (含 Generic 子目录), 读出每份的 Model 字段
+        var models = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var fullPaths = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (string f in Directory.EnumerateFiles(Templates, "*.xml", SearchOption.AllDirectories))
+        {
+            string name = Path.GetFileName(f);
+            try
+            {
+                var cfg = Configs.MSIFlux_Config.Load(f);
+                string model = cfg?.Model ?? "";
+                models[name] = model;
+                fullPaths[name] = f;
+            }
+            catch
+            {
+                // 单份配置坏了不影响整体判定
+            }
+        }
+
+        if (models.Count == 0) return null;
+
+        var profile = MachineProfile.Detect();
+        string? chosen = profile.SelectConfigFile(models);
+        if (chosen is null) return null;
+
+        return fullPaths.TryGetValue(chosen, out string? p) ? p : null;
     }
 
     private static int _templatesExtracted = 0;
