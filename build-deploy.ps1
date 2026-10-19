@@ -100,6 +100,50 @@ if ($sizeMB -gt 12) {
     Write-Warn "体积 $sizeMB MB 超出预期 (9-11 MB)，请检查是否误开了 PublishReadyToRun/SelfContained"
 }
 
+# ── 4b. 产物验证（部署前必查，防止部署坏构建）──────────────────────
+#
+# 2026-10-19 事故：曾把 publish_single 里一个 FileVersion=0.0.0.0、
+# 缺失 SDDL 的坏构建部署到桌面。后果是 IPC 管道 ACL 不对，GUI 连不上
+# 服务、性能调节全部失效，但服务本身能跑，很难一眼看出问题。
+#
+# 因此部署前强制校验三项硬指标：
+#   1. FileVersion 必须等于 csproj 的 <Version>
+#   2. 二进制内必须含管道 ACL 的 SDDL 字符串
+#   3. 体积必须在合理区间
+# 任一不过直接中止，不进入部署。
+Write-Step '产物验证 (部署前必查)'
+
+$artifactItem = Get-Item $artifact
+$fileVer = $artifactItem.VersionInfo.FileVersion
+
+# 1. FileVersion
+if ($fileVer -ne $version) {
+    throw "产物版本不匹配: FileVersion='$fileVer'，期望 '$version'。可能是旧构建残留或 csproj 未更新。"
+}
+Write-Ok "FileVersion = $fileVer"
+
+# 2. SDDL（IPC 管道 ACL）。缺失会导致 GUI 连不上服务。
+#    字符串在程序集里以 UTF-16 存储，直接按 Unicode 解码搜索。
+$bytes = [System.IO.File]::ReadAllBytes($artifact)
+$text  = [System.Text.Encoding]::Unicode.GetString($bytes)
+if (-not $text.Contains('O:BAG:SYD')) {
+    throw "产物缺少 IPC 管道 ACL 的 SDDL 定义 (O:BAG:SYD)。这会导致 GUI 无法连接服务。"
+}
+if (-not $text.Contains('GRGW')) {
+    throw "产物缺少管道 ACL 的 GRGW（读写）授权。普通用户将无法连接服务。"
+}
+Write-Ok '管道 ACL (SDDL) 完整'
+
+# 3. 体积下限（防止空壳/截断产物）
+if ($artifactItem.Length -lt 5000000) {
+    throw "产物体积异常偏小: $($artifactItem.Length) 字节，疑似构建不完整。"
+}
+Write-Ok "体积 $($artifactItem.Length) 字节"
+
+# 记录 MD5，方便和发布页/部署文件对照
+$artifactMd5 = (Get-FileHash $artifact -Algorithm MD5).Hash
+Write-Ok "MD5 $artifactMd5"
+
 # ── 5. 冒烟测试（不触发 GUI / 不改服务状态）────────────────────────
 Write-Step '冒烟测试'
 $proc = Start-Process -FilePath $artifact -ArgumentList '--stop-service' `
@@ -120,8 +164,28 @@ if (-not (Test-Path $DeployDir)) { New-Item -ItemType Directory -Path $DeployDir
 
 $running = Get-Process -Name 'MSI Flux' -ErrorAction SilentlyContinue
 if ($running) {
-    Write-Warn "MSI Flux 正在运行 ($($running.Count) 个进程)，文件可能被占用"
-    Write-Warn '请先从托盘退出程序，或先执行: sc.exe stop MSIFluxService'
+    Write-Warn "MSI Flux 正在运行 ($($running.Count) 个进程)，尝试自动停止以便替换文件"
+    # 先停服务（服务进程也占着 exe），再结束 GUI 进程
+    $svcRun = Get-Service -Name 'MSIFluxService' -ErrorAction SilentlyContinue
+    if ($svcRun -and $svcRun.Status -ne 'Stopped') {
+        try {
+            Stop-Service -Name 'MSIFluxService' -Force -ErrorAction Stop
+            Start-Sleep -Seconds 2
+            Write-Ok '服务已停止'
+        } catch {
+            Write-Warn "停止服务失败（可能需要管理员）: $($_.Exception.Message)"
+        }
+    }
+    Get-Process -Name 'MSI Flux' -ErrorAction SilentlyContinue | ForEach-Object {
+        try { $_.Kill(); } catch { }
+    }
+    Start-Sleep -Seconds 2
+
+    $still = Get-Process -Name 'MSI Flux' -ErrorAction SilentlyContinue
+    if ($still) {
+        throw "仍有 $($still.Count) 个 MSI Flux 进程无法结束，请手动从托盘退出后重试"
+    }
+    Write-Ok '所有 MSI Flux 进程已结束'
 }
 
 New-Item -ItemType Directory -Force -Path $BackupDir | Out-Null
@@ -143,10 +207,46 @@ if ($PSCmdlet.ShouldProcess($target, "复制 v$version")) {
     Write-Ok "已部署 v$version ($sizeMB MB)，哈希校验通过"
 }
 
+# ── 6b. 部署后验证：IPC 管道连通性 ────────────────────────────────
+#
+# 若后台服务正在运行，用普通用户身份试连一次主管道。
+# 连得上说明管道 ACL 正确（GUI 能连服务）；连不上说明 ACL 有问题，
+# 这正是 2026-10-19 那次坏构建的症状。
+#
+# 服务未运行时跳过（无管道可连，属正常情况）。
+Write-Step '部署后验证'
+$svc = Get-Service -Name 'MSIFluxService' -ErrorAction SilentlyContinue
+if ($null -eq $svc) {
+    Write-Warn 'MSIFluxService 未注册，跳过管道连通性检查'
+}
+elseif ($svc.Status -ne 'Running') {
+    Write-Warn "服务状态为 $($svc.Status)，跳过管道连通性检查（需重启服务才生效）"
+}
+else {
+    $pipeOk = $false
+    $pipeErr = ''
+    try {
+        $pipe = New-Object System.IO.Pipes.NamedPipeClientStream(
+            '.', 'MSIFlux-Server', [System.IO.Pipes.PipeDirection]::InOut)
+        try {
+            $pipe.Connect(3000)
+            $pipeOk = $true
+        }
+        finally { $pipe.Dispose() }
+    }
+    catch { $pipeErr = $_.Exception.Message }
+
+    if (-not $pipeOk) {
+        throw "IPC 管道连接失败（ACL 可能有误，GUI 将无法连上服务）: $pipeErr"
+    }
+    Write-Ok "IPC 管道连通 (MSIFlux-Server)"
+}
+
 # ── 7. 汇总 ───────────────────────────────────────────────────────
 Write-Step '完成'
 Write-Host "  版本   : v$version"
 Write-Host "  体积   : $sizeMB MB"
+Write-Host "  MD5    : $artifactMd5"
 Write-Host "  位置   : $target"
 Write-Host "  备份   : $BackupDir"
 Write-Host ''
